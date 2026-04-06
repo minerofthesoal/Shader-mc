@@ -1,0 +1,64 @@
+// __multiversion__
+// This shader is from the Shader-mc shader pack.
+// First-person hand / held-item vertex shader for Minecraft Bedrock Edition.
+// Passes through attributes needed for lighting and color grading
+// that matches the surrounding world.
+
+#include "vertexVersionCentroid.h"
+
+#if __VERSION__ >= 300
+    #ifndef BYPASS_PIXEL_SHADER
+        _centroid out lowp vec4 vColor;
+        _centroid out highp vec2 vTexCoord;
+        out highp vec3 vNormal;
+        out highp vec3 vViewPos;
+        out highp vec3 vLightDir;
+    #endif
+#else
+    #ifndef BYPASS_PIXEL_SHADER
+        varying lowp vec4 vColor;
+        varying highp vec2 vTexCoord;
+        varying highp vec3 vNormal;
+        varying highp vec3 vViewPos;
+        varying highp vec3 vLightDir;
+    #endif
+#endif
+
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+    precision highp float;
+#else
+    precision mediump float;
+#endif
+
+// Vertex attributes
+attribute POS4 POSITION;
+attribute vec3 NORMAL;
+attribute vec2 TEXCOORD_0;
+attribute vec4 COLOR;
+
+// Transform uniforms
+uniform MAT4 WORLDVIEWPROJ;
+uniform MAT4 WORLD;
+uniform MAT4 VIEW;
+
+// Approximated sun direction (same as entity shader)
+const vec3 SUN_DIR = normalize(vec3(0.6, 0.8, 0.4));
+
+void main()
+{
+    gl_Position = WORLDVIEWPROJ * POSITION;
+
+#ifndef BYPASS_PIXEL_SHADER
+    vTexCoord = TEXCOORD_0;
+    vColor = COLOR;
+
+    // World-space normal
+    vNormal = normalize((WORLD * vec4(NORMAL, 0.0)).xyz);
+
+    // View-space position (used for specular and view direction)
+    vViewPos = (VIEW * WORLD * POSITION).xyz;
+
+    // Light direction for fragment lighting
+    vLightDir = SUN_DIR;
+#endif
+}

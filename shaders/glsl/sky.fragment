@@ -1,0 +1,337 @@
+// __multiversion__
+// HyperRealistic Shaders - Sky Fragment
+// Atmospheric scattering, volumetric clouds, aurora borealis,
+// procedural stars with milky way, god ray prep.
+
+#include "fragmentVersionCentroid.h"
+
+#if __VERSION__ >= 300
+    _centroid in lowp vec4 vColor;
+    _centroid in highp vec3 vPosition;
+#else
+    varying lowp vec4 vColor;
+    varying highp vec3 vPosition;
+#endif
+
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+    precision highp float;
+#else
+    precision mediump float;
+#endif
+
+uniform vec4 FOG_COLOR;
+uniform vec4 CURRENT_COLOR;
+uniform highp float TIME;
+
+#define PI 3.14159265
+
+// Scattering constants
+const vec3 RAYLEIGH_BETA = vec3(5.8e-3, 1.35e-2, 3.31e-2);
+const float MIE_BETA = 3.0e-3;
+const float MIE_G = 0.76;
+
+// ============================================================
+//  Noise
+// ============================================================
+float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+
+float hash31(vec3 p) {
+    p = fract(p * vec3(443.897, 441.423, 437.195));
+    p += dot(p, p.yzx + 19.19);
+    return fract((p.x + p.y) * p.z);
+}
+
+float valueNoise3D(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+
+    float n000 = hash31(i);
+    float n100 = hash31(i + vec3(1, 0, 0));
+    float n010 = hash31(i + vec3(0, 1, 0));
+    float n110 = hash31(i + vec3(1, 1, 0));
+    float n001 = hash31(i + vec3(0, 0, 1));
+    float n101 = hash31(i + vec3(1, 0, 1));
+    float n011 = hash31(i + vec3(0, 1, 1));
+    float n111 = hash31(i + vec3(1, 1, 1));
+
+    return mix(mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+               mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
+}
+
+float fbm(vec3 p) {
+    float v = 0.0, a = 0.5;
+    for (int i = 0; i < 4; i++) {
+        v += a * valueNoise3D(p);
+        p *= 2.01;
+        a *= 0.5;
+    }
+    return v;
+}
+
+// ============================================================
+//  Time-of-day
+// ============================================================
+float getDayFactor() {
+    return smoothstep(0.1, 0.35, dot(FOG_COLOR.rgb, vec3(0.299, 0.587, 0.114)));
+}
+
+float getSunsetFactor() {
+    float b = dot(FOG_COLOR.rgb, vec3(0.299, 0.587, 0.114));
+    return smoothstep(0.1, 0.2, b) * smoothstep(0.45, 0.25, b);
+}
+
+// ============================================================
+//  Atmospheric Scattering
+// ============================================================
+float rayleighPhase(float cosTheta) {
+    return (3.0 / (16.0 * PI)) * (1.0 + cosTheta * cosTheta);
+}
+
+float hgPhase(float cosTheta, float g) {
+    float g2 = g * g;
+    float denom = 1.0 + g2 - 2.0 * g * cosTheta;
+    return (1.0 / (4.0 * PI)) * (1.0 - g2) / (denom * sqrt(denom));
+}
+
+vec3 atmosphericScattering(vec3 viewDir, vec3 sunDir, float dayFactor) {
+    float cosTheta = dot(viewDir, sunDir);
+    float zenith = max(viewDir.y, 0.001);
+    float optDepth = 1.0 / (zenith + 0.15 * pow(max(93.885 - degrees(acos(zenith)), 1.0), -1.253));
+
+    vec3 rayleigh = RAYLEIGH_BETA * rayleighPhase(cosTheta) * optDepth;
+    float mie = MIE_BETA * hgPhase(cosTheta, MIE_G) * optDepth;
+    vec3 extinction = exp(-(RAYLEIGH_BETA + MIE_BETA) * optDepth * 1.2);
+    vec3 scatter = (rayleigh + mie) * (1.0 - extinction);
+
+    vec3 sunColor = mix(vec3(1.0, 0.45, 0.15), vec3(1.0, 0.95, 0.88),
+                        smoothstep(-0.05, 0.3, sunDir.y));
+    return scatter * sunColor * dayFactor * 3.0;
+}
+
+// ============================================================
+//  Sunset gradient
+// ============================================================
+vec3 sunsetGradient(vec3 viewDir, float sunsetFactor) {
+    float horizonMask = 1.0 - smoothstep(-0.02, 0.35, viewDir.y);
+    float t = smoothstep(-0.05, 0.15, viewDir.y);
+    vec3 grad = mix(vec3(1.0, 0.42, 0.12), vec3(0.65, 0.15, 0.35), t);
+    grad = mix(grad, vec3(0.45, 0.35, 0.65), smoothstep(0.1, 0.3, viewDir.y));
+    return grad * horizonMask * sunsetFactor * 1.4;
+}
+
+// ============================================================
+//  Stars with color variation and milky way
+// ============================================================
+vec3 starField(vec3 dir, float nightFactor) {
+    vec3 starPos = dir * 300.0;
+    float noise = valueNoise3D(starPos);
+
+    float stars = smoothstep(0.965, 0.985, noise);
+
+    // Twinkle
+    float twinkle = sin(hash21(floor(starPos.xy)) * 6283.0 + TIME * 2.0) * 0.5 + 0.5;
+    stars *= mix(0.6, 1.0, twinkle);
+    stars *= smoothstep(0.0, 0.15, dir.y);
+
+    // Star color variation
+    float colorSeed = hash31(floor(starPos));
+    vec3 starColor = vec3(0.9, 0.92, 1.0); // default blue-white
+    if (colorSeed < 0.15) starColor = vec3(1.0, 0.85, 0.6);    // yellow
+    else if (colorSeed < 0.25) starColor = vec3(1.0, 0.6, 0.4); // orange
+    else if (colorSeed < 0.4) starColor = vec3(0.7, 0.8, 1.0);  // blue
+
+    // Milky Way band (diagonal stripe of dense stars)
+    float milkyWay = smoothstep(0.3, 0.0, abs(dir.x * 0.6 + dir.y * 0.8 - 0.3));
+    float milkyNoise = valueNoise3D(dir * 150.0);
+    float milkyStars = smoothstep(0.92, 0.97, milkyNoise) * milkyWay;
+
+    vec3 result = starColor * stars * 1.5;
+    result += vec3(0.6, 0.65, 0.8) * milkyStars * 0.8;
+    // Milky Way glow
+    result += vec3(0.08, 0.06, 0.12) * milkyWay * smoothstep(0.4, 0.55, milkyNoise);
+
+    return result * nightFactor;
+}
+
+// ============================================================
+//  Aurora Borealis
+// ============================================================
+vec3 aurora(vec3 viewDir, float nightFactor) {
+    if (viewDir.y < 0.1 || nightFactor < 0.3) return vec3(0.0);
+
+    // Aurora curtains: vertical bands that wave across the sky
+    float curtainX = viewDir.x * 3.0 + sin(viewDir.z * 2.0 + TIME * 0.15) * 0.5;
+
+    // Curtain shape from layered sin waves
+    float curtain = 0.0;
+    curtain += sin(curtainX * 4.0 + TIME * 0.3) * 0.5 + 0.5;
+    curtain *= sin(curtainX * 7.0 - TIME * 0.2) * 0.5 + 0.5;
+    curtain *= sin(curtainX * 2.5 + TIME * 0.1) * 0.3 + 0.7;
+
+    // Vertical falloff: aurora is high up, fades at horizon and zenith
+    float verticalMask = smoothstep(0.15, 0.45, viewDir.y) * smoothstep(0.9, 0.55, viewDir.y);
+
+    // Add noise for organic breakup
+    float noiseMask = valueNoise3D(vec3(curtainX * 5.0, viewDir.y * 8.0, TIME * 0.1));
+    curtain *= smoothstep(0.3, 0.6, noiseMask);
+
+    // Color: green center, purple/cyan edges
+    vec3 auroraGreen = vec3(0.1, 0.9, 0.4);
+    vec3 auroraCyan  = vec3(0.15, 0.7, 0.8);
+    vec3 auroraPurple = vec3(0.5, 0.1, 0.7);
+
+    float colorMix = sin(curtainX * 3.0 + TIME * 0.2) * 0.5 + 0.5;
+    vec3 auroraColor = mix(auroraGreen, auroraCyan, colorMix * 0.5);
+    auroraColor = mix(auroraColor, auroraPurple, smoothstep(0.5, 0.8, viewDir.y) * 0.4);
+
+    float intensity = curtain * verticalMask * nightFactor * 0.35;
+    return auroraColor * intensity;
+}
+
+// ============================================================
+//  Volumetric Clouds
+// ============================================================
+vec3 volumetricClouds(vec3 viewDir, vec3 sunDir, float dayFactor) {
+    if (viewDir.y < 0.02) return vec3(0.0);
+
+    float CLOUD_HEIGHT = 0.3;
+    vec2 uv = viewDir.xz / (viewDir.y + CLOUD_HEIGHT);
+    uv *= 1.8;
+
+    // Wind drift
+    vec2 wind = vec2(TIME * 0.008, TIME * 0.003);
+    uv += wind;
+
+    // Cloud density from FBM
+    float density = 0.0;
+    density += valueNoise3D(vec3(uv * 1.0, TIME * 0.005)) * 0.5;
+    density += valueNoise3D(vec3(uv * 2.3, TIME * 0.008)) * 0.25;
+    density += valueNoise3D(vec3(uv * 5.1, TIME * 0.012)) * 0.125;
+    density += valueNoise3D(vec3(uv * 10.0, TIME * 0.015)) * 0.0625;
+
+    // Threshold for cloud shape
+    float cloudMask = smoothstep(0.45, 0.65, density);
+
+    // Weather: darker/thicker clouds when foggy
+    float fogBrightness = dot(FOG_COLOR.rgb, vec3(0.299, 0.587, 0.114));
+    float weatherDark = smoothstep(0.4, 0.15, fogBrightness);
+    cloudMask *= 1.0 + weatherDark * 0.3;
+
+    // Cloud lighting: bright where facing sun
+    float sunCos = dot(normalize(vec3(uv, 1.0)), sunDir) * 0.5 + 0.5;
+    float lightIntensity = mix(0.3, 1.0, sunCos);
+
+    // Cloud color
+    vec3 brightCloud = mix(vec3(0.95, 0.93, 0.90), vec3(1.0, 0.85, 0.6),
+                          getSunsetFactor() * 0.6);
+    vec3 darkCloud = mix(vec3(0.25, 0.28, 0.35), vec3(0.15, 0.15, 0.2), weatherDark);
+
+    vec3 cloudColor = mix(darkCloud, brightCloud, lightIntensity) * dayFactor;
+    cloudColor += darkCloud * (1.0 - dayFactor) * 0.1; // dim night clouds
+
+    // Fade toward horizon and zenith
+    float heightMask = smoothstep(0.02, 0.18, viewDir.y) * smoothstep(0.85, 0.45, viewDir.y);
+    cloudMask *= heightMask;
+
+    return cloudColor * cloudMask * 0.7;
+}
+
+// ============================================================
+//  Moon glow
+// ============================================================
+vec3 moonGlow(vec3 viewDir, float nightFactor) {
+    vec3 moonDir = normalize(vec3(0.0, 0.8, -0.6));
+    float moonDot = max(dot(viewDir, moonDir), 0.0);
+    float glow = pow(moonDot, 64.0) * 0.35 + pow(moonDot, 512.0) * 1.2;
+    return vec3(0.55, 0.60, 0.75) * glow * nightFactor;
+}
+
+// ============================================================
+//  Sun disc and corona
+// ============================================================
+vec3 sunDiscAndCorona(vec3 viewDir, vec3 sunDir, float dayFactor) {
+    float sunDot = max(dot(viewDir, sunDir), 0.0);
+    float disc = smoothstep(0.9994, 0.9998, sunDot);
+    float corona = pow(sunDot, 256.0) * 0.8 + pow(sunDot, 64.0) * 0.2;
+
+    // Light pillars near sunrise/sunset
+    float pillars = 0.0;
+    float sunsetFactor = getSunsetFactor();
+    if (sunsetFactor > 0.1) {
+        float horizAlign = smoothstep(0.02, 0.0, abs(viewDir.x - sunDir.x));
+        float vertStretch = smoothstep(0.0, 0.4, abs(viewDir.y - sunDir.y));
+        pillars = horizAlign * (1.0 - vertStretch) * sunsetFactor * 0.3;
+    }
+
+    vec3 sunColor = vec3(1.0, 0.95, 0.8);
+    return sunColor * (disc * 2.5 + corona + pillars) * dayFactor;
+}
+
+// ============================================================
+//  Main
+// ============================================================
+void main() {
+#ifdef BYPASS_PIXEL_SHADER
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+    return;
+#endif
+
+    vec3 viewDir = normalize(vPosition);
+    float dayFactor = getDayFactor();
+    float nightFactor = 1.0 - dayFactor;
+    float sunsetFactor = getSunsetFactor();
+
+    float sunHeight = mix(-0.1, 0.65, dayFactor);
+    vec3 sunDir = normalize(vec3(0.3, sunHeight, 0.8));
+
+    // ---- Base sky gradient ----
+    float upMask = smoothstep(-0.05, 0.7, viewDir.y);
+    vec3 dayGrad = mix(vec3(0.52, 0.68, 0.92), vec3(0.18, 0.32, 0.72), upMask);
+    vec3 nightGrad = mix(vec3(0.01, 0.015, 0.04), vec3(0.005, 0.007, 0.02), upMask);
+    vec3 sky = mix(nightGrad, dayGrad, dayFactor);
+
+    // ---- Atmospheric scattering ----
+    sky += atmosphericScattering(viewDir, sunDir, dayFactor);
+
+    // ---- Sunset gradient ----
+    sky += sunsetGradient(viewDir, sunsetFactor);
+
+    // ---- Stars (with color + milky way) ----
+    sky += starField(viewDir, nightFactor);
+
+    // ---- Aurora borealis (night only) ----
+    sky += aurora(viewDir, nightFactor);
+
+    // ---- Moon glow ----
+    sky += moonGlow(viewDir, nightFactor);
+
+    // ---- Sun disc + corona + light pillars ----
+    sky += sunDiscAndCorona(viewDir, sunDir, dayFactor);
+
+    // ---- Volumetric clouds ----
+    vec3 clouds = volumetricClouds(viewDir, sunDir, dayFactor);
+    sky = mix(sky, sky + clouds, min(length(clouds) * 3.0, 1.0));
+
+    // ---- Horizon fog blending ----
+    float horizonFog = 1.0 - smoothstep(-0.02, 0.22, viewDir.y);
+    sky = mix(sky, FOG_COLOR.rgb, horizonFog * 0.65);
+
+    // ---- Below-horizon ----
+    float belowHorizon = smoothstep(0.0, -0.15, viewDir.y);
+    sky = mix(sky, FOG_COLOR.rgb * 0.5, belowHorizon);
+
+    // Tone-map (Reinhard)
+    sky = sky / (sky + vec3(1.0));
+    sky = pow(sky, vec3(1.0 / 2.0));
+
+    // God ray source in alpha
+    float godRaySrc = pow(max(dot(viewDir, sunDir), 0.0), 128.0) * dayFactor;
+    godRaySrc += pow(max(dot(viewDir, sunDir), 0.0), 32.0) * 0.15 * dayFactor;
+
+    gl_FragColor = vec4(sky, clamp(godRaySrc + vColor.a, 0.0, 1.0));
+}

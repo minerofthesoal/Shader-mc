@@ -1,0 +1,5 @@
+build/
+*.mcpack
+*.zip
+.DS_Store
+__MACOSX/

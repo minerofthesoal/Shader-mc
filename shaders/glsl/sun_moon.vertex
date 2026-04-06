@@ -1,0 +1,39 @@
+// __multiversion__
+// This shader is from the Shader-mc shader pack.
+// Sun / Moon vertex shader for Minecraft Bedrock Edition.
+
+#include "vertexVersionCentroid.h"
+
+#if __VERSION__ >= 300
+    #ifndef BYPASS_PIXEL_SHADER
+        _centroid out highp vec2 vTexCoord;
+        _centroid out lowp vec4 vColor;
+    #endif
+#else
+    #ifndef BYPASS_PIXEL_SHADER
+        varying highp vec2 vTexCoord;
+        varying lowp vec4 vColor;
+    #endif
+#endif
+
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+    precision highp float;
+#else
+    precision mediump float;
+#endif
+
+attribute POS4 POSITION;
+attribute vec2 TEXCOORD_0;
+attribute vec4 COLOR;
+
+uniform MAT4 WORLDVIEWPROJ;
+
+void main()
+{
+    gl_Position = WORLDVIEWPROJ * POSITION;
+
+#ifndef BYPASS_PIXEL_SHADER
+    vTexCoord = TEXCOORD_0;
+    vColor = COLOR;
+#endif
+}

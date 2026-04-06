@@ -1,0 +1,105 @@
+// __multiversion__
+// This shader is from the Shader-mc shader pack.
+// Particle fragment shader for Minecraft Bedrock Edition.
+// Features: color grading (ACES tonemap, vibrance) and fog blending
+// to match the terrain and entity visual style.
+
+#include "fragmentVersionCentroid.h"
+
+#if __VERSION__ >= 300
+    #ifndef BYPASS_PIXEL_SHADER
+        _centroid in lowp vec4 vColor;
+        _centroid in highp vec2 vTexCoord;
+        in highp float vFogFactor;
+    #endif
+#else
+    #ifndef BYPASS_PIXEL_SHADER
+        varying lowp vec4 vColor;
+        varying highp vec2 vTexCoord;
+        varying highp float vFogFactor;
+    #endif
+#endif
+
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+    precision highp float;
+#else
+    precision mediump float;
+#endif
+
+uniform sampler2D TEXTURE_0;
+uniform vec4 FOG_COLOR;
+uniform vec4 CURRENT_COLOR;
+
+// ============================================================
+// Color grading constants (shared with terrain/entity shaders)
+// ============================================================
+const float VIBRANCE = 0.18;
+
+// ============================================================
+// ACES Filmic Tonemapping
+// ============================================================
+vec3 acesTonemap(vec3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// ============================================================
+// Vibrance adjustment
+// ============================================================
+vec3 applyVibrance(vec3 color, float amount) {
+    float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    float maxCh = max(color.r, max(color.g, color.b));
+    float minCh = min(color.r, min(color.g, color.b));
+    float sat = (maxCh - minCh) / max(maxCh, 0.001);
+    float boost = amount * (1.0 - sat);
+    return mix(vec3(luminance), color, 1.0 + boost);
+}
+
+void main()
+{
+#ifdef BYPASS_PIXEL_SHADER
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+    return;
+#else
+
+    // Sample particle texture
+    vec4 texColor = texture2D(TEXTURE_0, vTexCoord);
+    vec4 color = texColor * CURRENT_COLOR * vColor;
+
+    // Alpha test
+    #ifdef ALPHA_TEST
+        if (color.a < 0.5) {
+            discard;
+        }
+    #endif
+
+    // --------------------------------------------------------
+    // Color grading
+    // --------------------------------------------------------
+    vec3 rgb = color.rgb;
+
+    // Warm tint to match world lighting
+    rgb *= vec3(1.04, 1.0, 0.96);
+
+    // Vibrance
+    rgb = applyVibrance(rgb, VIBRANCE);
+
+    // ACES tonemapping
+    rgb = acesTonemap(rgb);
+
+    // Gamma correction
+    rgb = pow(rgb, vec3(1.0 / 2.2));
+
+    // --------------------------------------------------------
+    // Fog blending
+    // --------------------------------------------------------
+    rgb = mix(FOG_COLOR.rgb, rgb, vFogFactor);
+
+    gl_FragColor = vec4(rgb, color.a);
+
+#endif // BYPASS_PIXEL_SHADER
+}

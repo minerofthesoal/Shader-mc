@@ -1,0 +1,179 @@
+// __multiversion__
+// This shader is from the Shader-mc shader pack.
+// Sun / Moon fragment shader with lens flare, corona, and god ray source.
+
+#include "fragmentVersionCentroid.h"
+
+#if __VERSION__ >= 300
+    _centroid in highp vec2 vTexCoord;
+    _centroid in lowp vec4 vColor;
+#else
+    varying highp vec2 vTexCoord;
+    varying lowp vec4 vColor;
+#endif
+
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+    precision highp float;
+#else
+    precision mediump float;
+#endif
+
+uniform sampler2D TEXTURE_0;
+uniform vec4 CURRENT_COLOR;
+uniform vec4 FOG_COLOR;
+
+// ============================================================
+//  Helpers
+// ============================================================
+
+float luminance(vec3 c) {
+    return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
+float getDayFactor() {
+    return smoothstep(0.1, 0.35, luminance(FOG_COLOR.rgb));
+}
+
+// Simple 2D hash for procedural effects
+float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+
+// ============================================================
+//  Lens flare ring
+// ============================================================
+float lensFlareRing(vec2 uv, float radius, float width) {
+    float d = length(uv - 0.5);
+    return smoothstep(radius + width, radius, d) *
+           smoothstep(radius - width, radius, d);
+}
+
+// ============================================================
+//  Radial streak pattern (anamorphic-style)
+// ============================================================
+float radialStreaks(vec2 uv, float count) {
+    vec2 centered = uv - 0.5;
+    float angle = atan(centered.y, centered.x);
+    float streak = pow(abs(sin(angle * count)), 24.0);
+    float falloff = 1.0 / (1.0 + 12.0 * dot(centered, centered));
+    return streak * falloff;
+}
+
+// ============================================================
+//  Main
+// ============================================================
+void main() {
+#ifdef BYPASS_PIXEL_SHADER
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+    return;
+#endif
+
+    vec4 texColor = texture2D(TEXTURE_0, vTexCoord);
+    float dayFactor = getDayFactor();
+
+    // Centre of the quad in UV space
+    vec2 centeredUV = vTexCoord - 0.5;
+    float distFromCenter = length(centeredUV);
+
+    // -------------------------------------------------------
+    //  Determine if we are rendering the sun or the moon
+    //  Sun quads tend to be drawn during the day (high dayFactor)
+    //  and the texture is often mostly white / bright.
+    // -------------------------------------------------------
+    float texBrightness = luminance(texColor.rgb);
+    bool isSun = (dayFactor > 0.35) && (texBrightness > 0.3 || texColor.a > 0.01);
+
+    // -------------------------------------------------------
+    //  Sun rendering
+    // -------------------------------------------------------
+    if (isSun) {
+        // --- Bright sun disc ---
+        float discMask = smoothstep(0.22, 0.08, distFromCenter);
+        vec3 discColor = vec3(1.0, 0.98, 0.88) * 3.0 * discMask;
+
+        // --- Soft inner glow / corona ---
+        float innerGlow = exp(-distFromCenter * 5.0) * 1.2;
+        vec3 coronaColor = vec3(1.0, 0.85, 0.55) * innerGlow;
+
+        // --- Wide outer corona ---
+        float outerGlow = exp(-distFromCenter * 2.2) * 0.35;
+        vec3 outerCorona = vec3(1.0, 0.75, 0.4) * outerGlow;
+
+        // --- Lens flare rings ---
+        float ring1 = lensFlareRing(vTexCoord, 0.32, 0.012) * 0.18;
+        float ring2 = lensFlareRing(vTexCoord, 0.42, 0.008) * 0.10;
+        vec3 flareColor = vec3(0.9, 0.8, 0.6) * (ring1 + ring2);
+
+        // --- Radial streaks ---
+        float streaks = radialStreaks(vTexCoord, 6.0) * 0.15;
+        vec3 streakColor = vec3(1.0, 0.92, 0.7) * streaks;
+
+        // --- Chromatic fringe at disc edge ---
+        float fringeR = smoothstep(0.16, 0.10, distFromCenter);
+        float fringeB = smoothstep(0.18, 0.12, distFromCenter);
+        vec3 fringe = vec3(fringeR * 0.08, 0.0, fringeB * 0.06);
+
+        // Compose sun
+        vec3 sun = discColor + coronaColor + outerCorona + flareColor + streakColor + fringe;
+
+        // Modulate with original texture alpha and vertex color
+        float alpha = max(texColor.a, discMask * 0.9 + outerGlow * 0.5);
+        sun *= CURRENT_COLOR.rgb;
+
+        // --- God ray source intensity ---
+        // Encode high brightness in alpha for radial-blur post-processing
+        float godRayIntensity = discMask * 0.9 + innerGlow * 0.5;
+        godRayIntensity = clamp(godRayIntensity, 0.0, 1.0);
+
+        // --- Bloom contribution ---
+        // Boost output beyond 1.0 so bloom post-pass can pick it up
+        vec3 bloom = sun * 0.3;
+        sun += bloom * smoothstep(0.3, 0.0, distFromCenter);
+
+        // Tone-map (soft clamp to preserve HDR intent while staying in range)
+        sun = sun / (sun + vec3(1.0));
+
+        gl_FragColor = vec4(sun, clamp(alpha * CURRENT_COLOR.a, 0.0, 1.0));
+
+    // -------------------------------------------------------
+    //  Moon rendering
+    // -------------------------------------------------------
+    } else {
+        // Use the original texture with enhanced brightness
+        vec3 moonBase = texColor.rgb;
+
+        // Slight blue tint for moonlight feel
+        moonBase = mix(moonBase, moonBase * vec3(0.8, 0.85, 1.0), 0.4);
+
+        // Soft glow around the moon disc
+        float glow = exp(-distFromCenter * 3.5) * 0.25;
+        vec3 glowColor = vec3(0.55, 0.6, 0.75) * glow;
+
+        // Outer atmospheric halo
+        float halo = exp(-distFromCenter * 1.8) * 0.1;
+        vec3 haloColor = vec3(0.4, 0.45, 0.6) * halo;
+
+        // Brightness boost for visibility
+        moonBase *= 1.3;
+
+        vec3 moon = moonBase + glowColor + haloColor;
+        moon *= CURRENT_COLOR.rgb;
+
+        // Bloom contribution (softer than sun)
+        float bloomFactor = smoothstep(0.25, 0.0, distFromCenter) * 0.15;
+        moon += moon * bloomFactor;
+
+        // God ray source (much subtler for moonlight)
+        float moonGodRay = exp(-distFromCenter * 4.0) * 0.25 * (1.0 - dayFactor);
+
+        // Tone-map
+        moon = moon / (moon + vec3(1.0));
+
+        float alpha = texColor.a * CURRENT_COLOR.a;
+        alpha = max(alpha, glow * 0.6);
+
+        gl_FragColor = vec4(moon, clamp(alpha, 0.0, 1.0));
+    }
+}
