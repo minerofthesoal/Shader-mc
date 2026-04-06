@@ -75,8 +75,8 @@ void main() {
     // -- Texture coordinates --------------------------------------------------
     texcoord = (gl_TextureMatrix[0] * gl_MultiTexCoord0).st;
 
-    // -- Lightmap (OptiFine stores lightmap in MultiTexCoord1, 0-255 range) ---
-    lmcoord = clamp(gl_MultiTexCoord1.st / 256.0, 0.0, 1.0);
+    // -- Lightmap (OptiFine/Iris standard transform) --------------------------
+    lmcoord = clamp((gl_TextureMatrix[1] * gl_MultiTexCoord1).st, 0.0, 1.0);
 
     // -- Vertex colour --------------------------------------------------------
     glcolor = gl_Color;

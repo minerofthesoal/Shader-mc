@@ -172,8 +172,8 @@ vec3 computeSSR(vec2 uv, vec3 sceneColor) {
 
     if (!isWater && !isReflective) return sceneColor;
 
-    // Reflectivity: water is fairly reflective, metals more so
-    float baseReflectivity = isWater ? 0.04 : 0.5;
+    // Reflectivity: water has subtle reflections, metals more so
+    float baseReflectivity = isWater ? 0.02 : 0.5;
 
     // Reconstruct view-space position and normal
     vec3 viewPos = getViewPos(uv, depth);
@@ -256,8 +256,10 @@ vec3 computeSSR(vec2 uv, vec3 sceneColor) {
     float distFade = 1.0 - clamp(traveled / SSR_MAX_DISTANCE, 0.0, 1.0);
     distFade = distFade * distFade;
 
-    // Combine
+    // Combine - cap water reflections to keep water looking like water
     float reflectionStrength = F * edgeFade * distFade;
+    float maxReflection = isWater ? 0.45 : 0.85;
+    reflectionStrength = min(reflectionStrength, maxReflection);
     return mix(sceneColor, hitColor, reflectionStrength);
 }
 #endif

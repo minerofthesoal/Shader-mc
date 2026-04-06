@@ -82,7 +82,7 @@ void main() {
     texcoord = (gl_TextureMatrix[0] * gl_MultiTexCoord0).st;
 
     // -- Lightmap -------------------------------------------------------------
-    lmcoord = clamp(gl_MultiTexCoord1.st / 256.0, 0.0, 1.0);
+    lmcoord = clamp((gl_TextureMatrix[1] * gl_MultiTexCoord1).st, 0.0, 1.0);
 
     // -- Vertex colour --------------------------------------------------------
     glcolor = gl_Color;

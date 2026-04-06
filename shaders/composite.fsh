@@ -214,8 +214,8 @@ vec3 computeShadow(vec3 viewPos, float NdotL) {
 // ---------------------------------------------------------------------------
 #ifdef DYNAMIC_LIGHTS
 vec3 computeDynamicLight(float blockLight) {
-    // Smooth the lightmap value for a nicer falloff
-    float light = pow(blockLight, 2.5);
+    // Smooth the lightmap value with gentler falloff
+    float light = pow(blockLight, 1.8);
 
     // Warm torch color palette: orange-yellow at full brightness
     vec3 torchColor = vec3(1.0, 0.65, 0.30);
@@ -224,7 +224,7 @@ vec3 computeDynamicLight(float blockLight) {
     vec3 dimTorch = vec3(0.85, 0.50, 0.20);
     vec3 finalTorch = mix(dimTorch, torchColor, light);
 
-    return finalTorch * light * 1.2;
+    return finalTorch * light * 1.5;
 }
 #endif
 
@@ -544,10 +544,18 @@ void main() {
         #endif
     }
 
-    // ---- 3) God rays (applied to both sky and terrain) ----
+    // ---- 3) God rays ----
     #ifdef GODRAYS
         vec3 rays = computeGodRays(texcoord, sceneColor);
-        finalColor += rays;
+        if (isSky) {
+            // Sky gets full god ray contribution
+            finalColor += rays;
+        } else {
+            // Terrain: attenuate by sky exposure so rays don't bleed underground
+            // Also attenuate by NdotL so back-facing surfaces don't get rays
+            float rayOcclusion = smoothstep(0.1, 0.5, skyLight) * max(NdotL * 0.5 + 0.5, 0.0);
+            finalColor += rays * rayOcclusion;
+        }
     #endif
 
     // ================================================================

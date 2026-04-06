@@ -179,7 +179,7 @@ vec3 applyChromaticAberration(vec2 uv) {
     float dist = length(centered);
 
     // Offset strength increases toward edges (quadratic falloff)
-    float strength = dist * dist * 0.008;
+    float strength = dist * dist * 0.003;
 
     // Offset direction is radial from center
     vec2 dir = normalize(centered + vec2(0.0001)); // avoid zero
