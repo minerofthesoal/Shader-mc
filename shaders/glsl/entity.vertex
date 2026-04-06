@@ -1,0 +1,85 @@
+// __multiversion__
+// This shader is from the Shader-mc shader pack.
+// Entity vertex shader for Minecraft Bedrock Edition.
+// Handles mobs, items, armor stands, and other world entities.
+
+#include "fragmentVersionCentroid.h"
+
+#if __VERSION__ >= 300
+    #ifndef BYPASS_PIXEL_SHADER
+        _centroid out lowp vec4 vColor;
+        _centroid out highp vec2 vTexCoord;
+        out highp vec3 vWorldPos;
+        out highp vec3 vViewPos;
+        out highp vec3 vNormal;
+        out highp float vFogFactor;
+        out highp vec3 vLightDir;
+    #endif
+#else
+    #ifndef BYPASS_PIXEL_SHADER
+        varying lowp vec4 vColor;
+        varying highp vec2 vTexCoord;
+        varying highp vec3 vWorldPos;
+        varying highp vec3 vViewPos;
+        varying highp vec3 vNormal;
+        varying highp float vFogFactor;
+        varying highp vec3 vLightDir;
+    #endif
+#endif
+
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+    precision highp float;
+#else
+    precision mediump float;
+#endif
+
+// Vertex attributes
+attribute POS4 POSITION;
+attribute vec3 NORMAL;
+attribute vec2 TEXCOORD_0;
+attribute vec4 COLOR;
+
+// Transform uniforms
+uniform MAT4 WORLDVIEWPROJ;
+uniform MAT4 WORLD;
+uniform MAT4 VIEW;
+
+// Fog uniforms
+uniform vec4 FOG_COLOR;
+uniform vec2 FOG_CONTROL;  // x = fog start, y = fog end
+
+// Sun/light direction approximation
+// In Bedrock we derive this from TIME or use a constant
+const vec3 SUN_DIR = normalize(vec3(0.6, 0.8, 0.4));
+
+void main()
+{
+    // Transform to clip space
+    gl_Position = WORLDVIEWPROJ * POSITION;
+
+#ifndef BYPASS_PIXEL_SHADER
+    // Pass through texture coordinates
+    vTexCoord = TEXCOORD_0;
+
+    // Pass through vertex color (contains ambient occlusion and tint)
+    vColor = COLOR;
+
+    // World-space position for lighting calculations
+    vWorldPos = (WORLD * POSITION).xyz;
+
+    // View-space position for fog and specular
+    vViewPos = (VIEW * WORLD * POSITION).xyz;
+
+    // Transform normal to world space (using upper-left 3x3 of WORLD)
+    vNormal = normalize((WORLD * vec4(NORMAL, 0.0)).xyz);
+
+    // Pass light direction for fragment shader shadow/lighting
+    vLightDir = SUN_DIR;
+
+    // Calculate linear fog factor
+    // 0.0 = fully fogged, 1.0 = no fog
+    float viewDist = length(vViewPos);
+    float fogRange = FOG_CONTROL.y - FOG_CONTROL.x;
+    vFogFactor = clamp((FOG_CONTROL.y - viewDist) / max(fogRange, 0.001), 0.0, 1.0);
+#endif
+}

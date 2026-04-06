@@ -1,0 +1,201 @@
+// __multiversion__
+// This shader is from the Shader-mc shader pack.
+// Entity fragment shader for Minecraft Bedrock Edition.
+// Features: directional lighting, AO, shadow approximation, ACES tonemap,
+//           rim lighting, specular highlights, fog blending.
+
+#include "fragmentVersionCentroid.h"
+
+#if __VERSION__ >= 300
+    #ifndef BYPASS_PIXEL_SHADER
+        _centroid in lowp vec4 vColor;
+        _centroid in highp vec2 vTexCoord;
+        in highp vec3 vWorldPos;
+        in highp vec3 vViewPos;
+        in highp vec3 vNormal;
+        in highp float vFogFactor;
+        in highp vec3 vLightDir;
+    #endif
+#else
+    #ifndef BYPASS_PIXEL_SHADER
+        varying lowp vec4 vColor;
+        varying highp vec2 vTexCoord;
+        varying highp vec3 vWorldPos;
+        varying highp vec3 vViewPos;
+        varying highp vec3 vNormal;
+        varying highp float vFogFactor;
+        varying highp vec3 vLightDir;
+    #endif
+#endif
+
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+    precision highp float;
+#else
+    precision mediump float;
+#endif
+
+// Samplers and uniforms
+uniform sampler2D TEXTURE_0;
+uniform vec4 FOG_COLOR;
+uniform vec2 FOG_CONTROL;
+uniform vec4 CURRENT_COLOR;
+uniform highp float TIME;
+
+// ============================================================
+// Constants
+// ============================================================
+const float ALPHA_THRESHOLD  = 0.5;          // Alpha test cutoff
+const float AMBIENT_STRENGTH = 0.35;         // Minimum ambient light
+const float SHADOW_STRENGTH  = 0.45;         // How dark entity shadows get
+const float RIM_POWER        = 3.0;          // Rim lighting falloff exponent
+const float RIM_STRENGTH     = 0.25;         // Rim lighting intensity
+const float SPECULAR_POWER   = 32.0;         // Specular highlight sharpness
+const float SPECULAR_STRENGTH= 0.15;         // Specular highlight intensity
+const float VIBRANCE         = 0.20;         // Color vibrance boost
+
+// ============================================================
+// ACES Filmic Tonemapping (matches terrain shader)
+// Attempt a close approximation of the ACES RRT + ODT curve.
+// ============================================================
+vec3 acesTonemap(vec3 x) {
+    // Fitted curve: (x * (2.51x + 0.03)) / (x * (2.43x + 0.59) + 0.14)
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// ============================================================
+// Vibrance adjustment
+// Boosts saturation of muted colours more than already-vivid ones.
+// ============================================================
+vec3 applyVibrance(vec3 color, float amount) {
+    float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    float maxChannel = max(color.r, max(color.g, color.b));
+    float minChannel = min(color.r, min(color.g, color.b));
+    float saturation = (maxChannel - minChannel) / max(maxChannel, 0.001);
+    // Boost less-saturated pixels more
+    float boost = amount * (1.0 - saturation);
+    return mix(vec3(luminance), color, 1.0 + boost);
+}
+
+// ============================================================
+// Approximate dynamic shadow factor
+// Uses the dot between the surface normal and the light direction
+// combined with a vertical bias to fake self-shadowing on entities.
+// ============================================================
+float calcShadow(vec3 normal, vec3 lightDir) {
+    float NdotL = dot(normal, lightDir);
+    // Smooth step from shadow to lit
+    float shadow = smoothstep(-0.1, 0.5, NdotL);
+    // Darken the underside of entities more aggressively
+    float verticalBias = smoothstep(-0.3, 0.3, normal.y);
+    return mix(1.0 - SHADOW_STRENGTH, 1.0, shadow * verticalBias);
+}
+
+// ============================================================
+// Rim lighting
+// Fresnel-like effect: bright edges when viewed against light.
+// ============================================================
+float calcRimLight(vec3 normal, vec3 viewDir, vec3 lightDir) {
+    float rim = 1.0 - max(dot(normal, viewDir), 0.0);
+    rim = pow(rim, RIM_POWER);
+    // Only show rim on the lit side
+    float facing = max(dot(normal, lightDir), 0.0);
+    return rim * facing * RIM_STRENGTH;
+}
+
+// ============================================================
+// Specular highlight (Blinn-Phong)
+// Gives wet/metallic entities a shiny glint.
+// ============================================================
+float calcSpecular(vec3 normal, vec3 viewDir, vec3 lightDir) {
+    vec3 halfVec = normalize(lightDir + viewDir);
+    float NdotH = max(dot(normal, halfVec), 0.0);
+    return pow(NdotH, SPECULAR_POWER) * SPECULAR_STRENGTH;
+}
+
+void main()
+{
+#ifdef BYPASS_PIXEL_SHADER
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+    return;
+#else
+
+    // --------------------------------------------------------
+    // 1. Texture sampling and alpha test
+    // --------------------------------------------------------
+    vec4 texColor = texture2D(TEXTURE_0, vTexCoord);
+    vec4 baseColor = texColor * CURRENT_COLOR;
+
+    #ifdef ALPHA_TEST
+        if (baseColor.a < ALPHA_THRESHOLD) {
+            discard;
+        }
+    #endif
+
+    vec3 color = baseColor.rgb;
+
+    // --------------------------------------------------------
+    // 2. Ambient occlusion from vertex color
+    // --------------------------------------------------------
+    // Bedrock stores light level / AO in vertex color RGB
+    float ao = vColor.r * 0.5 + 0.5;   // remap from [0,1] -> [0.5,1]
+    color *= ao;
+
+    // --------------------------------------------------------
+    // 3. Directional lighting with shadow approximation
+    // --------------------------------------------------------
+    vec3 N = normalize(vNormal);
+    vec3 V = normalize(-vViewPos);       // view direction
+    vec3 L = normalize(vLightDir);       // light direction
+
+    float shadowFactor = calcShadow(N, L);
+
+    // Diffuse term: Lambert with ambient floor
+    float diffuse = max(dot(N, L), 0.0);
+    float lighting = mix(AMBIENT_STRENGTH, 1.0, diffuse) * shadowFactor;
+
+    color *= lighting;
+
+    // --------------------------------------------------------
+    // 4. Rim lighting for visual pop
+    // --------------------------------------------------------
+    float rim = calcRimLight(N, V, L);
+    color += vec3(rim) * baseColor.rgb;
+
+    // --------------------------------------------------------
+    // 5. Specular highlight (wet/metallic look)
+    // --------------------------------------------------------
+    float spec = calcSpecular(N, V, L);
+    color += vec3(spec);
+
+    // --------------------------------------------------------
+    // 6. Color grading (matches terrain shader)
+    // --------------------------------------------------------
+    // Slight warm tint to match sunlit terrain
+    color *= vec3(1.05, 1.0, 0.95);
+
+    // Vibrance boost
+    color = applyVibrance(color, VIBRANCE);
+
+    // ACES tonemapping
+    color = acesTonemap(color);
+
+    // Gamma correction (linear -> sRGB)
+    color = pow(color, vec3(1.0 / 2.2));
+
+    // --------------------------------------------------------
+    // 7. Fog blending
+    // --------------------------------------------------------
+    color = mix(FOG_COLOR.rgb, color, vFogFactor);
+
+    // --------------------------------------------------------
+    // Output
+    // --------------------------------------------------------
+    gl_FragColor = vec4(color, baseColor.a * vColor.a);
+
+#endif // BYPASS_PIXEL_SHADER
+}

@@ -1,0 +1,145 @@
+name: Build Shader Pack (1.21.11)
+
+on:
+  push:
+    branches: [ main, 'claude/**' ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build for Minecraft 1.21.11
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate manifest.json
+        run: |
+          echo "Validating manifest.json..."
+          python3 -c "
+          import json, sys
+          with open('manifest.json') as f:
+              m = json.load(f)
+          assert m.get('format_version') == 2, 'format_version must be 2'
+          assert 'header' in m, 'Missing header'
+          assert 'uuid' in m['header'], 'Missing header uuid'
+          assert 'modules' in m, 'Missing modules'
+          print('manifest.json is valid')
+          print(f'  Pack: {m[\"header\"][\"name\"]}')
+          print(f'  Version: {m[\"header\"][\"version\"]}')
+          print(f'  Min Engine: {m[\"header\"][\"min_engine_version\"]}')
+          "
+
+      - name: Validate shader files
+        run: |
+          echo "Checking shader files exist..."
+          REQUIRED_SHADERS=(
+            "shaders/glsl/renderchunk.vertex"
+            "shaders/glsl/renderchunk.fragment"
+            "shaders/glsl/sky.vertex"
+            "shaders/glsl/sky.fragment"
+          )
+          for shader in "${REQUIRED_SHADERS[@]}"; do
+            if [ ! -f "$shader" ]; then
+              echo "ERROR: Missing required shader: $shader"
+              exit 1
+            fi
+            echo "  OK: $shader ($(wc -l < "$shader") lines)"
+          done
+          echo ""
+          echo "All shader files:"
+          find shaders/ -type f | sort | while read f; do
+            echo "  $f ($(wc -l < "$f") lines)"
+          done
+
+      - name: Build shader pack
+        run: |
+          chmod +x scripts/build.sh
+          bash scripts/build.sh 1.21.11
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: HyperRealistic-Shaders-1.21.11
+          path: build/*.mcpack
+          retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/claude/')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version from manifest
+        id: version
+        run: |
+          VERSION=$(python3 -c "
+          import json
+          with open('manifest.json') as f:
+              m = json.load(f)
+          v = m['header']['version']
+          print(f'{v[0]}.{v[1]}.{v[2]}')
+          ")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Pack version: ${VERSION}"
+
+      - name: Build shader pack
+        run: |
+          chmod +x scripts/build.sh
+          bash scripts/build.sh 1.21.11
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}-1.21.11
+          name: "HyperRealistic Shaders v${{ steps.version.outputs.version }} (MC 1.21.11)"
+          body: |
+            ## HyperRealistic Shaders for Minecraft Bedrock 1.21.11
+
+            ### Features
+            - 🌅 Hyper-realistic color grading with ACES tone mapping
+            - ☀️ Volumetric sun god rays (light shafts)
+            - 🔮 Toggleable screen-space ray tracing
+            - ✨ HDR Bloom effects
+            - 🌊 Animated water with caustics, waves, and reflections
+            - 💡 Dynamic colored lighting (torches, lava, glowstone)
+            - 🌑 Dynamic shadows with ambient occlusion
+            - 🌑 Optional True Dark mode for realistic cave/night darkness
+
+            ### Variants
+            | File | Description |
+            |------|-------------|
+            | `Full.mcpack` | All features enabled (ray tracing + standard) |
+            | `Standard.mcpack` | No ray tracing (better performance) |
+            | `TrueDark.mcpack` | True dark mode enabled |
+            | `Ultra.mcpack` | Ray tracing + True dark (maximum quality) |
+            | `Lite.mcpack` | Performance mode (reduced effects) |
+
+            ### Installation
+            1. Download your preferred `.mcpack` variant
+            2. Double-click the file or import via Minecraft settings
+            3. Activate the resource pack in your world settings
+            4. Use subpack selector in pack settings to fine-tune features
+
+            ### Compatibility
+            - Minecraft Bedrock Edition 1.21.11+
+            - Works on Windows, Android, iOS, Xbox, PlayStation, Nintendo Switch
+          draft: false
+          prerelease: false
+          files: |
+            build/*.mcpack
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

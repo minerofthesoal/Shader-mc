@@ -1,0 +1,157 @@
+// __multiversion__
+// This shader is from the Shader-mc shader pack.
+// First-person hand / held-item fragment shader for Minecraft Bedrock Edition.
+// Features: directional lighting, ambient occlusion from vertex color,
+//           ACES tonemapping, vibrance, specular highlight, and color grading
+//           that matches the surrounding world (terrain + entity shaders).
+
+#include "fragmentVersionCentroid.h"
+
+#if __VERSION__ >= 300
+    #ifndef BYPASS_PIXEL_SHADER
+        _centroid in lowp vec4 vColor;
+        _centroid in highp vec2 vTexCoord;
+        in highp vec3 vNormal;
+        in highp vec3 vViewPos;
+        in highp vec3 vLightDir;
+    #endif
+#else
+    #ifndef BYPASS_PIXEL_SHADER
+        varying lowp vec4 vColor;
+        varying highp vec2 vTexCoord;
+        varying highp vec3 vNormal;
+        varying highp vec3 vViewPos;
+        varying highp vec3 vLightDir;
+    #endif
+#endif
+
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+    precision highp float;
+#else
+    precision mediump float;
+#endif
+
+// Samplers and uniforms
+uniform sampler2D TEXTURE_0;
+uniform vec4 FOG_COLOR;
+uniform vec4 CURRENT_COLOR;
+
+// ============================================================
+// Constants (tuned to match terrain and entity shaders)
+// ============================================================
+const float ALPHA_THRESHOLD   = 0.5;           // Alpha test cutoff
+const float AMBIENT_STRENGTH  = 0.40;          // Minimum ambient light (slightly higher for hand)
+const float SPECULAR_POWER    = 24.0;          // Specular highlight sharpness
+const float SPECULAR_STRENGTH = 0.12;          // Specular highlight intensity
+const float VIBRANCE          = 0.18;          // Color vibrance boost (matches terrain)
+
+// ============================================================
+// ACES Filmic Tonemapping (shared across all shaders)
+// ============================================================
+vec3 acesTonemap(vec3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// ============================================================
+// Vibrance adjustment (shared across all shaders)
+// Boosts saturation of muted colours more than already-vivid ones.
+// ============================================================
+vec3 applyVibrance(vec3 color, float amount) {
+    float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    float maxCh = max(color.r, max(color.g, color.b));
+    float minCh = min(color.r, min(color.g, color.b));
+    float sat = (maxCh - minCh) / max(maxCh, 0.001);
+    float boost = amount * (1.0 - sat);
+    return mix(vec3(luminance), color, 1.0 + boost);
+}
+
+// ============================================================
+// Blinn-Phong specular highlight
+// Gives held items and the hand a subtle shiny glint.
+// ============================================================
+float calcSpecular(vec3 normal, vec3 viewDir, vec3 lightDir) {
+    vec3 halfVec = normalize(lightDir + viewDir);
+    float NdotH = max(dot(normal, halfVec), 0.0);
+    return pow(NdotH, SPECULAR_POWER) * SPECULAR_STRENGTH;
+}
+
+void main()
+{
+#ifdef BYPASS_PIXEL_SHADER
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+    return;
+#else
+
+    // --------------------------------------------------------
+    // 1. Texture sampling and alpha test
+    // --------------------------------------------------------
+    vec4 texColor = texture2D(TEXTURE_0, vTexCoord);
+    vec4 baseColor = texColor * CURRENT_COLOR;
+
+    #ifdef ALPHA_TEST
+        if (baseColor.a < ALPHA_THRESHOLD) {
+            discard;
+        }
+    #endif
+
+    vec3 color = baseColor.rgb;
+
+    // --------------------------------------------------------
+    // 2. Ambient occlusion / tint from vertex color
+    // --------------------------------------------------------
+    // Vertex color carries light level and AO baked by the engine
+    float ao = vColor.r * 0.4 + 0.6;   // remap to [0.6, 1.0] range
+    color *= ao;
+
+    // --------------------------------------------------------
+    // 3. Directional lighting (Lambert diffuse)
+    // --------------------------------------------------------
+    vec3 N = normalize(vNormal);
+    vec3 V = normalize(-vViewPos);       // view direction (eye is at origin in view space)
+    vec3 L = normalize(vLightDir);       // light direction from vertex shader
+
+    float NdotL = max(dot(N, L), 0.0);
+    float lighting = mix(AMBIENT_STRENGTH, 1.0, NdotL);
+    color *= lighting;
+
+    // --------------------------------------------------------
+    // 4. Specular highlight (subtle glint on held items)
+    // --------------------------------------------------------
+    float spec = calcSpecular(N, V, L);
+    color += vec3(spec);
+
+    // --------------------------------------------------------
+    // 5. Color grading (matches world shaders)
+    // --------------------------------------------------------
+    // Warm tint to match sunlit terrain and entities
+    color *= vec3(1.04, 1.0, 0.96);
+
+    // Vibrance boost
+    color = applyVibrance(color, VIBRANCE);
+
+    // ACES tonemapping
+    color = acesTonemap(color);
+
+    // Gamma correction (linear -> sRGB)
+    color = pow(color, vec3(1.0 / 2.2));
+
+    // --------------------------------------------------------
+    // 6. Subtle fog tint on the hand
+    //    The hand is close to the camera so we apply only a very
+    //    light fog influence to keep it visually consistent with
+    //    the world without washing it out.
+    // --------------------------------------------------------
+    color = mix(FOG_COLOR.rgb, color, 0.95);
+
+    // --------------------------------------------------------
+    // Output
+    // --------------------------------------------------------
+    gl_FragColor = vec4(color, baseColor.a * vColor.a);
+
+#endif // BYPASS_PIXEL_SHADER
+}

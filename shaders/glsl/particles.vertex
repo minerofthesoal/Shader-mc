@@ -1,0 +1,56 @@
+// __multiversion__
+// This shader is from the Shader-mc shader pack.
+// Particle vertex shader for Minecraft Bedrock Edition.
+// Standard passthrough for block-break, flame, smoke, etc. particles.
+
+#include "fragmentVersionCentroid.h"
+
+#if __VERSION__ >= 300
+    #ifndef BYPASS_PIXEL_SHADER
+        _centroid out lowp vec4 vColor;
+        _centroid out highp vec2 vTexCoord;
+        out highp float vFogFactor;
+    #endif
+#else
+    #ifndef BYPASS_PIXEL_SHADER
+        varying lowp vec4 vColor;
+        varying highp vec2 vTexCoord;
+        varying highp float vFogFactor;
+    #endif
+#endif
+
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+    precision highp float;
+#else
+    precision mediump float;
+#endif
+
+// Vertex attributes
+attribute POS4 POSITION;
+attribute vec2 TEXCOORD_0;
+attribute vec4 COLOR;
+
+// Transform uniforms
+uniform MAT4 WORLDVIEWPROJ;
+uniform MAT4 WORLD;
+uniform MAT4 VIEW;
+
+// Fog uniforms
+uniform vec2 FOG_CONTROL;
+
+void main()
+{
+    gl_Position = WORLDVIEWPROJ * POSITION;
+
+#ifndef BYPASS_PIXEL_SHADER
+    // Pass through UVs and vertex color
+    vTexCoord = TEXCOORD_0;
+    vColor = COLOR;
+
+    // Fog calculation
+    vec3 viewPos = (VIEW * WORLD * POSITION).xyz;
+    float viewDist = length(viewPos);
+    float fogRange = FOG_CONTROL.y - FOG_CONTROL.x;
+    vFogFactor = clamp((FOG_CONTROL.y - viewDist) / max(fogRange, 0.001), 0.0, 1.0);
+#endif
+}

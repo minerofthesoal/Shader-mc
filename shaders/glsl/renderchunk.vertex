@@ -1,0 +1,194 @@
+// __multiversion__
+// This shader is from the Shader-mc shader pack.
+// Vertex Shader - Terrain/Block Rendering (renderchunk)
+// Handles world transform, water wave animation, fog, lightmap,
+// and sun direction calculation for the fragment shader.
+
+#version 100
+
+// ============================================================
+// CONFIGURATION
+// ============================================================
+#define WATER_WAVE_HEIGHT 0.03
+#define WAVE_SPEED 1.5
+#define WAVE_FREQUENCY 3.0
+
+// ============================================================
+// PRECISION
+// ============================================================
+precision highp float;
+
+// ============================================================
+// ATTRIBUTES - Standard Bedrock renderchunk geometry
+// ============================================================
+attribute mediump vec4 POSITION;
+attribute vec4 COLOR;
+attribute vec2 TEXCOORD_0;
+attribute vec2 TEXCOORD_1;
+
+// ============================================================
+// UNIFORMS - Standard Bedrock Edition
+// ============================================================
+uniform MAT4 WORLDVIEWPROJ;
+uniform MAT4 WORLD;
+uniform MAT4 VIEW;
+uniform MAT4 PROJ;
+uniform vec4 FOG_COLOR;
+uniform vec2 FOG_CONTROL;
+uniform vec4 CURRENT_COLOR;
+uniform vec2 TEXTURE_DIMENSIONS;
+uniform float TIME;
+uniform vec4 CHUNK_ORIGIN;
+
+// ============================================================
+// VARYINGS - Passed to fragment shader
+// ============================================================
+varying vec2 vTexCoord;
+varying vec2 vLightmapCoord;
+varying vec4 vColor;
+varying vec3 vWorldPos;
+varying vec3 vViewPos;
+varying float vFogFactor;
+varying vec3 vSunDir;
+varying float vIsWater;
+varying vec3 vNormal;
+varying float vCamDist;
+
+// ============================================================
+// HELPER: Hash-based noise for wave animation
+// ============================================================
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+float noise2D(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// ============================================================
+// HELPER: Detect water blocks via vertex color
+// Water vertices in Bedrock have alpha < 1.0 and blue tint
+// ============================================================
+float detectWater(vec4 color) {
+    float alphaTest = step(color.a, 0.95) * step(0.01, color.a);
+    float blueTest = step(color.r, color.b) * step(color.g, color.b);
+    return alphaTest * blueTest;
+}
+
+// ============================================================
+// HELPER: Calculate sun direction from TIME
+// Approximates a day cycle arc across the sky
+// ============================================================
+vec3 calculateSunDirection(float time) {
+    float dayAngle = time * 0.02;
+    float altitude = sin(dayAngle) * 0.8 + 0.15;
+    float azimuth = cos(dayAngle);
+    return normalize(vec3(azimuth, altitude, sin(dayAngle) * 0.5));
+}
+
+// ============================================================
+// HELPER: Linear fog factor from Bedrock FOG_CONTROL
+// FOG_CONTROL.x = start distance, FOG_CONTROL.y = end distance
+// ============================================================
+float computeFog(float camDist, vec2 fogControl) {
+    float fogStart = fogControl.x;
+    float fogEnd = fogControl.y;
+    return clamp((camDist - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
+}
+
+// ============================================================
+// MAIN VERTEX SHADER
+// ============================================================
+void main() {
+    // --------------------------------------------------------
+    // World-space position
+    // --------------------------------------------------------
+    vec4 worldPos = WORLD * POSITION;
+    vWorldPos = worldPos.xyz;
+
+    // --------------------------------------------------------
+    // Water detection (used by both vertex wave and fragment)
+    // --------------------------------------------------------
+    vIsWater = detectWater(COLOR);
+
+    // --------------------------------------------------------
+    // Water wave animation: displace Y with layered noise
+    // --------------------------------------------------------
+    vec4 animatedPos = POSITION;
+    if (vIsWater > 0.5) {
+        float t = TIME * WAVE_SPEED;
+        vec2 waveUV = worldPos.xz * WAVE_FREQUENCY;
+
+        // Three octaves of noise for organic wave shape
+        float wave = 0.0;
+        wave += noise2D(waveUV * 1.0 + t * 0.7) * 0.5;
+        wave += noise2D(waveUV * 2.3 - t * 1.1) * 0.25;
+        wave += noise2D(waveUV * 4.7 + t * 1.5) * 0.125;
+
+        // Centre around zero and apply height
+        wave = (wave - 0.4375) * 2.0;
+        animatedPos.y += wave * WATER_WAVE_HEIGHT;
+    }
+
+    // --------------------------------------------------------
+    // Clip-space transform
+    // --------------------------------------------------------
+    gl_Position = WORLDVIEWPROJ * animatedPos;
+
+    // --------------------------------------------------------
+    // View-space position (needed for fog, reflections, depth)
+    // --------------------------------------------------------
+    vec4 viewPos = VIEW * WORLD * animatedPos;
+    vViewPos = viewPos.xyz;
+
+    // --------------------------------------------------------
+    // Camera distance for fog
+    // --------------------------------------------------------
+    float camDist = length(viewPos.xyz);
+    vCamDist = camDist;
+
+    // --------------------------------------------------------
+    // Fog blending factor
+    // --------------------------------------------------------
+    vFogFactor = computeFog(camDist, FOG_CONTROL);
+
+    // --------------------------------------------------------
+    // Texture coordinates
+    // TEXCOORD_0 = terrain atlas UV
+    // TEXCOORD_1 = lightmap UV (x = block light, y = sky light)
+    // --------------------------------------------------------
+    vTexCoord = TEXCOORD_0;
+    vLightmapCoord = TEXCOORD_1;
+
+    // --------------------------------------------------------
+    // Vertex color carries ambient occlusion and biome tinting
+    // --------------------------------------------------------
+    vColor = COLOR;
+
+    // --------------------------------------------------------
+    // Approximate face normal from vertex color brightness
+    // Bedrock bakes directional shading into vertex color:
+    //   Top faces brightest, sides dimmer, bottom darkest
+    // --------------------------------------------------------
+    float brightness = dot(COLOR.rgb, vec3(0.299, 0.587, 0.114));
+    if (brightness > 0.85) {
+        vNormal = vec3(0.0, 1.0, 0.0);  // top face
+    } else if (brightness > 0.6) {
+        vNormal = vec3(0.7, 0.0, 0.7);  // side face
+    } else {
+        vNormal = vec3(0.0, -1.0, 0.0); // bottom face
+    }
+    vNormal = normalize(vNormal);
+
+    // --------------------------------------------------------
+    // Sun direction for lighting / shadow in fragment shader
+    // --------------------------------------------------------
+    vSunDir = calculateSunDirection(TIME);
+}

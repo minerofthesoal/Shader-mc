@@ -1,0 +1,174 @@
+name: Build Shader Pack (1.21.9-10)
+
+on:
+  push:
+    branches: [ main, 'claude/**' ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-1-21-9:
+    name: Build for Minecraft 1.21.9
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate manifest.json
+        run: |
+          echo "Validating manifest.json..."
+          python3 -c "
+          import json, sys
+          with open('manifest.json') as f:
+              m = json.load(f)
+          assert m.get('format_version') == 2, 'format_version must be 2'
+          assert 'header' in m, 'Missing header'
+          print('manifest.json is valid')
+          "
+
+      - name: Validate shader files
+        run: |
+          echo "Checking shader files..."
+          find shaders/ -type f | sort | while read f; do
+            echo "  $f ($(wc -l < "$f") lines)"
+          done
+
+      - name: Build shader pack for 1.21.9
+        run: |
+          chmod +x scripts/build.sh
+          bash scripts/build.sh 1.21.9
+
+      - name: Upload artifacts (1.21.9)
+        uses: actions/upload-artifact@v4
+        with:
+          name: HyperRealistic-Shaders-1.21.9
+          path: build/*.mcpack
+          retention-days: 30
+
+  build-1-21-10:
+    name: Build for Minecraft 1.21.10
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate manifest.json
+        run: |
+          echo "Validating manifest.json..."
+          python3 -c "
+          import json, sys
+          with open('manifest.json') as f:
+              m = json.load(f)
+          assert m.get('format_version') == 2, 'format_version must be 2'
+          print('manifest.json is valid')
+          "
+
+      - name: Validate shader files
+        run: |
+          find shaders/ -type f | sort | while read f; do
+            echo "  $f ($(wc -l < "$f") lines)"
+          done
+
+      - name: Build shader pack for 1.21.10
+        run: |
+          chmod +x scripts/build.sh
+          bash scripts/build.sh 1.21.10
+
+      - name: Upload artifacts (1.21.10)
+        uses: actions/upload-artifact@v4
+        with:
+          name: HyperRealistic-Shaders-1.21.10
+          path: build/*.mcpack
+          retention-days: 30
+
+  release:
+    name: Create Release (1.21.9-10)
+    needs: [build-1-21-9, build-1-21-10]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/claude/')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version from manifest
+        id: version
+        run: |
+          VERSION=$(python3 -c "
+          import json
+          with open('manifest.json') as f:
+              m = json.load(f)
+          v = m['header']['version']
+          print(f'{v[0]}.{v[1]}.{v[2]}')
+          ")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build all variants for 1.21.9
+        run: |
+          chmod +x scripts/build.sh
+          bash scripts/build.sh 1.21.9
+          mkdir -p release-assets
+          for f in build/*.mcpack; do
+            cp "$f" "release-assets/$(basename "${f%.mcpack}")-1.21.9.mcpack"
+          done
+
+      - name: Build all variants for 1.21.10
+        run: |
+          rm -rf build
+          bash scripts/build.sh 1.21.10
+          for f in build/*.mcpack; do
+            cp "$f" "release-assets/$(basename "${f%.mcpack}")-1.21.10.mcpack"
+          done
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}-1.21.9-10
+          name: "HyperRealistic Shaders v${{ steps.version.outputs.version }} (MC 1.21.9-10)"
+          body: |
+            ## HyperRealistic Shaders for Minecraft Bedrock 1.21.9 - 1.21.10
+
+            ### Features
+            - 🌅 Hyper-realistic color grading with ACES tone mapping
+            - ☀️ Volumetric sun god rays (light shafts)
+            - 🔮 Toggleable screen-space ray tracing
+            - ✨ HDR Bloom effects
+            - 🌊 Animated water with caustics, waves, and reflections
+            - 💡 Dynamic colored lighting (torches, lava, glowstone)
+            - 🌑 Dynamic shadows with ambient occlusion
+            - 🌑 Optional True Dark mode
+
+            ### Downloads
+            Each version includes these variants:
+            | Variant | Description |
+            |---------|-------------|
+            | `Full` | All features enabled |
+            | `Standard` | No ray tracing (better performance) |
+            | `TrueDark` | True dark mode for realistic darkness |
+            | `Ultra` | Ray tracing + True dark (maximum quality) |
+            | `Lite` | Performance mode |
+
+            ### Installation
+            1. Download the `.mcpack` matching your Minecraft version
+            2. Double-click or import via Minecraft settings
+            3. Activate in world resource pack settings
+            4. Adjust subpack settings for feature toggles
+
+            ### Compatibility
+            - Minecraft Bedrock Edition 1.21.9 and 1.21.10
+            - All platforms: Windows, Android, iOS, Xbox, PlayStation, Switch
+          draft: false
+          prerelease: false
+          files: |
+            release-assets/*.mcpack
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
