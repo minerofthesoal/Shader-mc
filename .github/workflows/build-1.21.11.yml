@@ -15,51 +15,56 @@ permissions:
 
 jobs:
   build:
-    name: Build for Minecraft 1.21.11
+    name: Build for Minecraft Java 1.21.11
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate manifest.json
-        run: |
-          echo "Validating manifest.json..."
-          python3 -c "
-          import json, sys
-          with open('manifest.json') as f:
-              m = json.load(f)
-          assert m.get('format_version') == 2, 'format_version must be 2'
-          assert 'header' in m, 'Missing header'
-          assert 'uuid' in m['header'], 'Missing header uuid'
-          assert 'modules' in m, 'Missing modules'
-          print('manifest.json is valid')
-          print(f'  Pack: {m[\"header\"][\"name\"]}')
-          print(f'  Version: {m[\"header\"][\"version\"]}')
-          print(f'  Min Engine: {m[\"header\"][\"min_engine_version\"]}')
-          "
-
       - name: Validate shader files
         run: |
-          echo "Checking shader files exist..."
-          REQUIRED_SHADERS=(
-            "shaders/glsl/renderchunk.vertex"
-            "shaders/glsl/renderchunk.fragment"
-            "shaders/glsl/sky.vertex"
-            "shaders/glsl/sky.fragment"
+          echo "Checking shader files..."
+          REQUIRED=(
+            "shaders/gbuffers_terrain.vsh"
+            "shaders/gbuffers_terrain.fsh"
+            "shaders/gbuffers_water.vsh"
+            "shaders/gbuffers_water.fsh"
+            "shaders/gbuffers_skybasic.vsh"
+            "shaders/gbuffers_skybasic.fsh"
+            "shaders/shadow.vsh"
+            "shaders/shadow.fsh"
+            "shaders/composite.vsh"
+            "shaders/composite.fsh"
+            "shaders/final.vsh"
+            "shaders/final.fsh"
+            "shaders/shaders.properties"
           )
-          for shader in "${REQUIRED_SHADERS[@]}"; do
-            if [ ! -f "$shader" ]; then
-              echo "ERROR: Missing required shader: $shader"
+          for f in "${REQUIRED[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "ERROR: Missing: $f"
               exit 1
             fi
-            echo "  OK: $shader ($(wc -l < "$shader") lines)"
+            echo "  OK: $f ($(wc -l < "$f") lines)"
           done
           echo ""
           echo "All shader files:"
           find shaders/ -type f | sort | while read f; do
             echo "  $f ($(wc -l < "$f") lines)"
           done
+
+      - name: Validate GLSL syntax
+        run: |
+          echo "Checking for common GLSL errors..."
+          ERRORS=0
+          for f in shaders/*.vsh shaders/*.fsh; do
+            if [ -f "$f" ]; then
+              if ! head -1 "$f" | grep -q '#version'; then
+                echo "WARNING: $f missing #version directive"
+              fi
+            fi
+          done
+          echo "Syntax check complete"
 
       - name: Build shader pack
         run: |
@@ -83,18 +88,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get version from manifest
+      - name: Get version
         id: version
         run: |
-          VERSION=$(python3 -c "
-          import json
-          with open('manifest.json') as f:
-              m = json.load(f)
-          v = m['header']['version']
-          print(f'{v[0]}.{v[1]}.{v[2]}')
-          ")
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Pack version: ${VERSION}"
+          LINES=$(find shaders/ -name '*.fsh' -o -name '*.vsh' | xargs wc -l | tail -1 | awk '{print $1}')
+          echo "version=1.0.0" >> "$GITHUB_OUTPUT"
+          echo "Total shader lines: ${LINES}"
 
       - name: Build shader pack
         run: |
@@ -104,39 +103,39 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}-1.21.11
+          tag_name: v${{ steps.version.outputs.version }}-mc1.21.11
           name: "HyperRealistic Shaders v${{ steps.version.outputs.version }} (MC 1.21.11)"
           body: |
-            ## HyperRealistic Shaders for Minecraft Bedrock 1.21.11
+            ## HyperRealistic Shaders for Minecraft Java Edition 1.21.11
 
             ### Features
-            - 🌅 Hyper-realistic color grading with ACES tone mapping
-            - ☀️ Volumetric sun god rays (light shafts)
-            - 🔮 Toggleable screen-space ray tracing
-            - ✨ HDR Bloom effects
-            - 🌊 Animated water with caustics, waves, and reflections
-            - 💡 Dynamic colored lighting (torches, lava, glowstone)
-            - 🌑 Dynamic shadows with ambient occlusion
-            - 🌑 Optional True Dark mode for realistic cave/night darkness
-
-            ### Variants
-            | File | Description |
-            |------|-------------|
-            | `Full.zip` | All features enabled (ray tracing + standard) |
-            | `Standard.zip` | No ray tracing (better performance) |
-            | `TrueDark.zip` | True dark mode enabled |
-            | `Ultra.zip` | Ray tracing + True dark (maximum quality) |
-            | `Lite.zip` | Performance mode (reduced effects) |
+            - Hyper-realistic ACES filmic tone mapping and color grading
+            - Volumetric sun god rays (light shafts)
+            - Toggleable screen-space ray tracing (SSR reflections)
+            - HDR Bloom with gaussian blur
+            - Shadow mapping with PCF soft shadows
+            - Animated water with Gerstner waves, caustics, foam, and reflections
+            - Dynamic colored lighting (torches, lava, glowstone)
+            - Volumetric height fog
+            - Subsurface scattering on vegetation
+            - Aurora borealis at night
+            - Volumetric clouds
+            - Optional True Dark mode
+            - Night eye adaptation
+            - Chromatic aberration and vignette
+            - Waving grass, leaves, and flowers
 
             ### Installation
-            1. Download your preferred `.zip` variant
-            2. Rename to `.mcpack` and double-click, or import directly via Minecraft settings
-            3. Activate the resource pack in your world settings
-            4. Use subpack selector in pack settings to fine-tune features
+            1. Install [OptiFine](https://optifine.net) or [Iris](https://irisshaders.dev) (Fabric)
+            2. Download the `.zip` file
+            3. Place in `.minecraft/shaderpacks/`
+            4. Select in Video Settings > Shaders
+            5. Configure features in Shader Options menu
 
             ### Compatibility
-            - Minecraft Bedrock Edition 1.21.11+
-            - Works on Windows, Android, iOS, Xbox, PlayStation, Nintendo Switch
+            - Minecraft Java Edition 1.21.9, 1.21.10, 1.21.11
+            - Requires OptiFine or Iris shader loader
+            - All quality presets configurable in-game (Low/Medium/High/Ultra)
           draft: false
           prerelease: false
           files: |

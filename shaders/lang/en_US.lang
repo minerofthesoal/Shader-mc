@@ -1,0 +1,74 @@
+profile.comment=Shader quality preset. Higher = better visuals, lower FPS.
+
+screen.LIGHTING=Lighting & Shadows
+screen.LIGHTING.comment=Configure shadow mapping and dynamic lighting.
+
+screen.POST_PROCESSING=Post Processing
+screen.POST_PROCESSING.comment=Bloom, god rays, ray tracing, and color grading.
+
+screen.WATER_OPTIONS=Water
+screen.WATER_OPTIONS.comment=Water rendering effects.
+
+screen.ATMOSPHERE=Atmosphere
+screen.ATMOSPHERE.comment=Sky, fog, clouds, and vegetation effects.
+
+screen.MISC=Miscellaneous
+screen.MISC.comment=Additional visual effects.
+
+option.SHADOWS=Shadows
+option.SHADOWS.comment=Enable shadow mapping for dynamic shadows.
+option.SHADOW_RES=Shadow Resolution
+option.SHADOW_RES.comment=Shadow map resolution. Higher = sharper shadows.
+value.SHADOW_RES.512=512
+value.SHADOW_RES.1024=1024
+value.SHADOW_RES.2048=2048 (Default)
+value.SHADOW_RES.4096=4096
+option.SHADOW_DIST=Shadow Distance
+option.SHADOW_QUALITY=Shadow Quality
+value.SHADOW_QUALITY.0=Low
+value.SHADOW_QUALITY.1=Medium
+value.SHADOW_QUALITY.2=High (Default)
+
+option.DYNAMIC_LIGHTS=Dynamic Lighting
+option.DYNAMIC_LIGHTS.comment=Colored light from torches, lava, glowstone.
+
+option.TRUE_DARK=True Dark Mode
+option.TRUE_DARK.comment=Pitch-black caves and nights. No ambient light in darkness.
+
+option.BLOOM=Bloom
+option.BLOOM.comment=HDR glow on bright surfaces.
+option.BLOOM_AMOUNT=Bloom Intensity
+option.GODRAYS=God Rays
+option.GODRAYS.comment=Volumetric light shafts from the sun.
+option.GODRAY_STRENGTH=God Ray Intensity
+option.RAYTRACING=Ray Tracing (SSR)
+option.RAYTRACING.comment=Screen-space reflections on water and wet surfaces.
+option.SSR_QUALITY=SSR Quality
+value.SSR_QUALITY.0=Off
+value.SSR_QUALITY.1=Low
+value.SSR_QUALITY.2=High (Default)
+
+option.EXPOSURE=Exposure
+option.SATURATION=Saturation
+option.COLOR_TEMPERATURE=Color Temperature
+
+option.WATER_EFFECTS=Water Effects
+option.WATER_WAVE_SIZE=Wave Size
+option.WATER_CAUSTICS=Caustics
+option.WATER_FOAM=Foam
+option.WATER_REFLECTIONS=Reflections
+
+option.VOLUMETRIC_FOG=Volumetric Fog
+option.VOLUMETRIC_FOG.comment=Height-based fog in valleys and low areas.
+option.AURORA=Aurora Borealis
+option.AURORA.comment=Northern lights at night.
+option.CLOUDS=Volumetric Clouds
+option.WAVING_PLANTS=Waving Plants
+option.SUBSURFACE_SCATTERING=Subsurface Scattering
+option.SUBSURFACE_SCATTERING.comment=Light through leaves and grass.
+
+option.VIGNETTE=Vignette
+option.VIGNETTE_AMOUNT=Vignette Strength
+option.CHROMATIC_ABERRATION=Chromatic Aberration
+option.NIGHT_EYE=Night Eye Adaptation
+option.NIGHT_EYE.comment=Blue shift and brightness adaptation in darkness.

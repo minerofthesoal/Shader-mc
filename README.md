@@ -1,60 +1,81 @@
 # HyperRealistic Shaders
 
-A hyper-realistic shader pack for **Minecraft Bedrock Edition 1.21.9 - 1.21.11**.
+A hyper-realistic shader pack for **Minecraft Java Edition 1.21.9 - 1.21.11**.
+Requires [OptiFine](https://optifine.net) or [Iris](https://irisshaders.dev) (Fabric/Quilt).
 
 ## Features
 
 | Feature | Description |
 |---------|-------------|
-| **ACES Tone Mapping** | Filmic color grading with exposure, saturation, and vibrance controls |
+| **ACES Tone Mapping** | Filmic color grading with adjustable exposure, saturation, and color temperature |
+| **Shadow Mapping** | PCF soft shadows with configurable resolution (512-4096) and distance |
 | **Sun God Rays** | Volumetric light shaft scattering from the sun |
-| **Toggleable Ray Tracing** | Screen-space reflections for water and wet surfaces |
-| **Bloom** | HDR bright-pass glow on emissive and bright surfaces |
-| **Water Effects** | Animated waves, caustics, specular highlights, foam, fresnel reflections |
+| **Screen-Space Ray Tracing** | Reflections on water and wet surfaces (toggleable) |
+| **HDR Bloom** | Gaussian-blurred glow on bright/emissive surfaces |
+| **Water Effects** | Gerstner waves, animated caustics, specular highlights, foam, fresnel reflections |
 | **Dynamic Lighting** | Colored light from torches (warm), lava (orange), glowstone (yellow) |
-| **Dynamic Shadows** | Sun-angle shadows with ambient occlusion and contact darkening |
-| **True Dark Mode** | Optional pitch-black caves and nights for survival horror gameplay |
-| **Atmospheric Sky** | Rayleigh/Mie scattering, procedural stars, moon glow, cloud wisps |
+| **Volumetric Fog** | Height-based fog denser in valleys, animated with noise |
+| **Subsurface Scattering** | Light transmission through leaves and grass (backlit glow) |
+| **Aurora Borealis** | Animated northern lights curtains at night (green/cyan/purple) |
+| **Volumetric Clouds** | FBM noise-based clouds with sun lighting and weather reactivity |
+| **True Dark Mode** | Optional pitch-black caves and nights |
+| **Night Eye Adaptation** | Blue shift and brightness adaptation in darkness |
+| **Waving Plants** | Wind-animated grass, leaves, flowers, crops, and vines |
+| **Vignette & Chromatic Aberration** | Cinematic screen effects |
 
-## Variants
+## Quality Presets
 
-| Variant | Ray Tracing | True Dark | Bloom | God Rays | Shadow Quality |
-|---------|:-----------:|:---------:|:-----:|:--------:|:--------------:|
-| **Full** (default) | On | Off | On | On | Medium |
-| **Standard** | Off | Off | On | On | Medium |
-| **True Dark** | Off | On | On | On | Medium |
-| **Ultra** | On | On | On | On | High |
-| **Lite** | Off | Off | Off | Off | Low |
+All features are toggleable in-game via **Shader Options** menu:
+
+| Preset | Shadows | Bloom | God Rays | SSR | Volumetric | Performance |
+|--------|:-------:|:-----:|:--------:|:---:|:----------:|:-----------:|
+| **Low** | 1024 | Off | Off | Off | Off | Best |
+| **Medium** | 1024 | On | On | Off | On | Good |
+| **High** (default) | 2048 | On | On | On | On | Moderate |
+| **Ultra** | 4096 | On | On | On | On | Demanding |
 
 ## Installation
 
-1. Download the `.mcpack` file for your Minecraft version
-2. Double-click to import, or go to **Settings > Storage > Import** in Minecraft
-3. Activate the pack in your world's **Resource Packs** settings
-4. Choose a subpack preset in the pack's gear/settings icon
+1. Install [OptiFine](https://optifine.net) or [Iris](https://irisshaders.dev) + Fabric
+2. Download the `.zip` from [Releases](../../releases)
+3. Place in `.minecraft/shaderpacks/`
+4. In-game: **Options > Video Settings > Shaders** > select the pack
+5. Click **Shader Options** to customize features
 
 ## Building from Source
 
 ```bash
-# Build for 1.21.11
 bash scripts/build.sh 1.21.11
+# Output: build/HyperRealistic-Shaders-v1.21.11.zip
+```
 
-# Build for 1.21.9
-bash scripts/build.sh 1.21.9
+## Shader Architecture
 
-# Output: build/*.mcpack
+```
+shaders/
+├── gbuffers_terrain.vsh/fsh    # Block/terrain geometry pass
+├── gbuffers_water.vsh/fsh      # Water geometry with wave animation
+├── gbuffers_entities.vsh/fsh   # Entity rendering
+├── gbuffers_hand.vsh/fsh       # First-person hand
+├── gbuffers_skybasic.vsh/fsh   # Sky atmosphere, stars, aurora
+├── gbuffers_skytextured.vsh/fsh # Sun/moon with corona
+├── gbuffers_textured*.vsh/fsh  # Particles and misc geometry
+├── gbuffers_weather.vsh/fsh    # Rain/snow particles
+├── shadow.vsh/fsh              # Shadow map rendering
+├── composite.vsh/fsh           # Shadow application, lighting, god rays, fog
+├── composite1.vsh/fsh          # SSR reflections, bloom blur
+├── composite2.vsh/fsh          # Bloom combine, night eye
+├── final.vsh/fsh               # Tone mapping, color grading, vignette
+├── shaders.properties          # Configuration and options
+└── lang/en_US.lang             # Option descriptions
 ```
 
 ## Compatibility
 
-- Minecraft Bedrock Edition 1.21.9, 1.21.10, 1.21.11
-- Windows 10/11, Android, iOS, Xbox, PlayStation, Nintendo Switch
-
-## CI/CD
-
-GitHub Actions workflows automatically build and create releases:
-- `build-1.21.11.yml` - Builds and releases for MC 1.21.11
-- `build-1.21.9-10.yml` - Builds and releases for MC 1.21.9 and 1.21.10
+- Minecraft Java Edition 1.21.9, 1.21.10, 1.21.11
+- OptiFine (any recent version)
+- Iris 1.7+ (Fabric/Quilt)
+- OpenGL 2.1+ (GLSL 120)
 
 ## License
 
