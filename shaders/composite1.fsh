@@ -160,13 +160,15 @@ vec3 computeSSR(vec2 uv, vec3 sceneColor) {
     // Skip sky
     if (depth > 0.999) return sceneColor;
 
-    // Read material data to detect water
+    // Read material data to detect water/reflective surfaces
+    // colortex2 layout: (encodedId, specular, roughness, blockLight)
     vec4 matData = texture2D(colortex2, uv);
-    float materialID = matData.b;
+    float specular  = matData.g;
+    float roughness = matData.b;
 
-    // Water is encoded as materialID ~ 0.5 (128/255) in our gbuffers
-    bool isWater     = (materialID > 0.45 && materialID < 0.55);
-    bool isReflective = (materialID > 0.70 && materialID < 0.80); // metals, polished
+    // Water: specular ~0.8 and roughness ~0.05 (set in gbuffers_water.fsh)
+    bool isWater     = (specular > 0.7 && roughness < 0.1);
+    bool isReflective = (specular > 0.5 && !isWater); // other reflective surfaces
 
     if (!isWater && !isReflective) return sceneColor;
 

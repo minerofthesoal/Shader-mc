@@ -18,7 +18,7 @@
 #define VOLUMETRIC_FOG
 #define SUBSURFACE_SCATTERING
 #define BLOOM
-#define BLOOM_AMOUNT 0.25      // [0.1 0.15 0.2 0.25 0.3 0.4 0.5]
+#define BLOOM_AMOUNT 0.15      // [0.1 0.15 0.2 0.25 0.3 0.4 0.5]
 
 // ---------------------------------------------------------------------------
 // Varyings
@@ -70,7 +70,7 @@ const int   GODRAY_SAMPLES   = 16;
 const float GODRAY_DECAY     = 0.96;
 const float GODRAY_DENSITY   = 1.0;
 
-const float BLOOM_THRESHOLD  = 0.60;
+const float BLOOM_THRESHOLD  = 0.75;
 
 const float SSS_STRENGTH     = 0.45;
 
@@ -224,7 +224,7 @@ vec3 computeDynamicLight(float blockLight) {
     vec3 dimTorch = vec3(0.85, 0.50, 0.20);
     vec3 finalTorch = mix(dimTorch, torchColor, light);
 
-    return finalTorch * light * 2.0;
+    return finalTorch * light * 1.2;
 }
 #endif
 
@@ -397,8 +397,17 @@ vec3 computeVolumetricFog(vec3 color, vec3 worldPos, float depth) {
 // ---------------------------------------------------------------------------
 #ifdef SUBSURFACE_SCATTERING
 vec3 computeSSS(vec3 color, vec3 normal, vec3 viewPos, float materialID) {
-    // Material IDs: we treat values near 0.25 (encoded ~64/255) as foliage
-    bool isVegetation = (materialID > 0.20 && materialID < 0.30);
+    // Detect vegetation blocks by encoded ID (blockId / 256.0)
+    // Leaves: 18(0.070), 161(0.629); Grass: 31(0.121), 175(0.684)
+    // Flowers: 37(0.145), 38(0.148); Vines: 106(0.414); Crops: 59(0.230)
+    float id256 = materialID * 256.0; // recover approximate block ID
+    bool isVegetation = (id256 > 17.5 && id256 < 18.5)   // leaves
+                     || (id256 > 160.5 && id256 < 161.5)  // leaves2
+                     || (id256 > 30.5 && id256 < 31.5)    // tallgrass
+                     || (id256 > 174.5 && id256 < 175.5)  // double_plant
+                     || (id256 > 36.5 && id256 < 38.5)    // flowers
+                     || (id256 > 105.5 && id256 < 106.5)  // vines
+                     || (id256 > 58.5 && id256 < 59.5);   // wheat
 
     if (!isVegetation) return color;
 
@@ -473,12 +482,12 @@ void main() {
     // Decode normal
     vec3 normal = decodeNormal(normalData.rgb);
 
-    // Lightmap channels (block light, sky light) stored in material data
-    // Common encoding: colortex1.a = blockLight, colortex2.g = skyLight
-    // Adjust these to match your gbuffers encoding
-    float blockLight = matData.r;
-    float skyLight   = matData.g;
-    float materialID = matData.b;
+    // Lightmap channels - must match gbuffers_terrain.fsh MRT layout:
+    //   colortex1 = (encodedNormal.rgb, lmcoord.y)  -> skyLight in alpha
+    //   colortex2 = (encodedId, specular, roughness, lmcoord.x) -> blockLight in alpha
+    float blockLight = matData.a;       // lmcoord.x from colortex2.a
+    float skyLight   = normalData.a;    // lmcoord.y from colortex1.a
+    float materialID = matData.r;       // encodedId from colortex2.r
 
     // Reconstruct positions
     vec3 viewPos  = getViewPos(texcoord, depth);
@@ -509,7 +518,7 @@ void main() {
             vec3 shadowed = finalColor * mix(vec3(1.0), shadowFactor, shadowInfluence);
 
             // Ambient fill so shadows aren't fully black
-            vec3 ambientColor = finalColor * 0.15;
+            vec3 ambientColor = finalColor * 0.08;
             finalColor = max(shadowed, ambientColor * shadowInfluence);
         #endif
 

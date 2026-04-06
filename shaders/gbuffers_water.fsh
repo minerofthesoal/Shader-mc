@@ -3,8 +3,9 @@
 /*
  * gbuffers_water.fsh
  * Fragment shader for translucent geometry (water, stained glass, ice).
- * Water gets a tinted semi-transparent colour; other translucents pass through
- * normally. Writes to gbuffer MRT in the same layout as terrain.
+ * Water gets tinted semi-transparent color with animated caustics and
+ * biome-blended coloring. Other translucents pass through.
+ * Writes to gbuffer MRT in same layout as terrain.
  */
 
 // ---------------------------------------------------------------------------
@@ -12,6 +13,7 @@
 // ---------------------------------------------------------------------------
 uniform sampler2D texture;
 uniform sampler2D lightmap;
+uniform float frameTimeCounter;
 
 // ---------------------------------------------------------------------------
 // Varyings
@@ -26,10 +28,22 @@ varying float blockId;
 varying float isWater;
 
 // ---------------------------------------------------------------------------
-// Water colour settings
+// Water settings
 // ---------------------------------------------------------------------------
-const vec3 WATER_TINT  = vec3(0.05, 0.15, 0.35); // deep-blue tint
-const float WATER_ALPHA = 0.55;                   // translucency
+const vec3 WATER_TINT    = vec3(0.08, 0.22, 0.38);   // blue tint
+const float WATER_ALPHA  = 0.58;                      // translucency
+
+// ---------------------------------------------------------------------------
+// Simple animated caustic pattern
+// ---------------------------------------------------------------------------
+float causticPattern(vec2 pos, float time) {
+    float c1 = sin(pos.x * 3.0 + time * 1.2) * sin(pos.y * 3.7 + time * 0.9);
+    float c2 = sin(pos.x * 2.3 - time * 0.8 + 1.0) * sin(pos.y * 2.8 + time * 1.1 + 2.0);
+    float c3 = sin((pos.x + pos.y) * 4.1 + time * 0.7);
+    float caustic = (c1 + c2 + c3 * 0.5) * 0.5 + 0.5;
+    caustic = pow(caustic, 2.0);
+    return caustic * 0.12;
+}
 
 // ---------------------------------------------------------------------------
 // Main
@@ -44,10 +58,22 @@ void main() {
 
     // -- Water-specific colour override ---------------------------------------
     if (isWater > 0.5) {
-        // Replace the flat water texture with a tinted translucent colour
-        // Keep vertex colour influence (biome water colour)
-        albedo.rgb = mix(WATER_TINT, glcolor.rgb, 0.3);
-        albedo.a   = WATER_ALPHA;
+        // Base water color blended with biome tint
+        vec3 waterColor = mix(WATER_TINT, glcolor.rgb * 0.4, 0.25);
+
+        // Add animated caustics on the water surface
+        float time = frameTimeCounter;
+        float caustic = causticPattern(worldPos.xz, time);
+        waterColor += vec3(caustic * 0.6, caustic * 0.8, caustic);
+
+        // Subtle view-angle darkening (deeper looking at steep angles)
+        float viewDot = abs(dot(normalize(normal), normalize(-viewPos)));
+        float fresnelDarken = mix(0.7, 1.0, viewDot);
+        waterColor *= fresnelDarken;
+
+        albedo.rgb = waterColor;
+        // Fresnel-based alpha: more opaque at glancing angles
+        albedo.a = mix(WATER_ALPHA + 0.15, WATER_ALPHA, viewDot);
     }
 
     // -- Lightmap -------------------------------------------------------------
@@ -62,7 +88,6 @@ void main() {
     gl_FragData[1] = vec4(encodedNormal, lmcoord.y);
 
     // -- MRT 2: material flags ------------------------------------------------
-    // For water: specular = 0.8 (reflective), roughness = 0.05 (smooth)
     float encodedId = blockId / 256.0;
     float specular  = (isWater > 0.5) ? 0.8 : 0.0;
     float roughness = (isWater > 0.5) ? 0.05 : 1.0;
