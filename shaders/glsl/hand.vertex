@@ -4,7 +4,7 @@
 // Passes through attributes needed for lighting and color grading
 // that matches the surrounding world.
 
-#include "fragmentVersionCentroid.h"
+#include "vertexVersionCentroid.h"
 
 #if __VERSION__ >= 300
     #ifndef BYPASS_PIXEL_SHADER

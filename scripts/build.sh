@@ -53,7 +53,7 @@ esac
 # Build default variant (all features including ray tracing)
 echo "Building default variant (Full features)..."
 cd "${BUILD_DIR}/pack"
-zip -r "../${OUTPUT_NAME}-Full.mcpack" . -x "*.DS_Store" -x "__MACOSX/*"
+zip -r "../${OUTPUT_NAME}-Full.zip" . -x "*.DS_Store" -x "__MACOSX/*"
 cd ../..
 
 # Build No-Raytracing variant
@@ -64,7 +64,7 @@ if [ -d "${BUILD_DIR}/pack-nort/subpacks/no_raytracing/shaders" ]; then
     cp -r "${BUILD_DIR}/pack-nort/subpacks/no_raytracing/shaders/"* "${BUILD_DIR}/pack-nort/shaders/"
 fi
 cd "${BUILD_DIR}/pack-nort"
-zip -r "../${OUTPUT_NAME}-Standard.mcpack" . -x "*.DS_Store" -x "__MACOSX/*"
+zip -r "../${OUTPUT_NAME}-Standard.zip" . -x "*.DS_Store" -x "__MACOSX/*"
 cd ../..
 
 # Build True Dark variant
@@ -75,7 +75,7 @@ if [ -d "${BUILD_DIR}/pack-td/subpacks/true_dark/shaders" ]; then
     cp -r "${BUILD_DIR}/pack-td/subpacks/true_dark/shaders/"* "${BUILD_DIR}/pack-td/shaders/"
 fi
 cd "${BUILD_DIR}/pack-td"
-zip -r "../${OUTPUT_NAME}-TrueDark.mcpack" . -x "*.DS_Store" -x "__MACOSX/*"
+zip -r "../${OUTPUT_NAME}-TrueDark.zip" . -x "*.DS_Store" -x "__MACOSX/*"
 cd ../..
 
 # Build Lite variant
@@ -86,7 +86,7 @@ if [ -d "${BUILD_DIR}/pack-lite/subpacks/lite/shaders" ]; then
     cp -r "${BUILD_DIR}/pack-lite/subpacks/lite/shaders/"* "${BUILD_DIR}/pack-lite/shaders/"
 fi
 cd "${BUILD_DIR}/pack-lite"
-zip -r "../${OUTPUT_NAME}-Lite.mcpack" . -x "*.DS_Store" -x "__MACOSX/*"
+zip -r "../${OUTPUT_NAME}-Lite.zip" . -x "*.DS_Store" -x "__MACOSX/*"
 cd ../..
 
 # Build Ultra variant (Ray Tracing + True Dark)
@@ -97,12 +97,12 @@ if [ -d "${BUILD_DIR}/pack-ultra/subpacks/raytracing_truedark/shaders" ]; then
     cp -r "${BUILD_DIR}/pack-ultra/subpacks/raytracing_truedark/shaders/"* "${BUILD_DIR}/pack-ultra/shaders/"
 fi
 cd "${BUILD_DIR}/pack-ultra"
-zip -r "../${OUTPUT_NAME}-Ultra.mcpack" . -x "*.DS_Store" -x "__MACOSX/*"
+zip -r "../${OUTPUT_NAME}-Ultra.zip" . -x "*.DS_Store" -x "__MACOSX/*"
 cd ../..
 
 echo ""
 echo "=== Build Complete ==="
 echo "Output files:"
-ls -lh "${BUILD_DIR}"/*.mcpack
+ls -lh "${BUILD_DIR}"/*.zip
 echo ""
-echo "Total variants built: $(ls ${BUILD_DIR}/*.mcpack | wc -l)"
+echo "Total variants built: $(ls ${BUILD_DIR}/*.zip | wc -l)"

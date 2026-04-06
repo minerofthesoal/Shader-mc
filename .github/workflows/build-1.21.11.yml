@@ -70,7 +70,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: HyperRealistic-Shaders-1.21.11
-          path: build/*.mcpack
+          path: build/*.zip
           retention-days: 30
 
   release:
@@ -122,15 +122,15 @@ jobs:
             ### Variants
             | File | Description |
             |------|-------------|
-            | `Full.mcpack` | All features enabled (ray tracing + standard) |
-            | `Standard.mcpack` | No ray tracing (better performance) |
-            | `TrueDark.mcpack` | True dark mode enabled |
-            | `Ultra.mcpack` | Ray tracing + True dark (maximum quality) |
-            | `Lite.mcpack` | Performance mode (reduced effects) |
+            | `Full.zip` | All features enabled (ray tracing + standard) |
+            | `Standard.zip` | No ray tracing (better performance) |
+            | `TrueDark.zip` | True dark mode enabled |
+            | `Ultra.zip` | Ray tracing + True dark (maximum quality) |
+            | `Lite.zip` | Performance mode (reduced effects) |
 
             ### Installation
-            1. Download your preferred `.mcpack` variant
-            2. Double-click the file or import via Minecraft settings
+            1. Download your preferred `.zip` variant
+            2. Rename to `.mcpack` and double-click, or import directly via Minecraft settings
             3. Activate the resource pack in your world settings
             4. Use subpack selector in pack settings to fine-tune features
 
@@ -140,6 +140,6 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            build/*.mcpack
+            build/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -3,7 +3,7 @@
 // Particle vertex shader for Minecraft Bedrock Edition.
 // Standard passthrough for block-break, flame, smoke, etc. particles.
 
-#include "fragmentVersionCentroid.h"
+#include "vertexVersionCentroid.h"
 
 #if __VERSION__ >= 300
     #ifndef BYPASS_PIXEL_SHADER

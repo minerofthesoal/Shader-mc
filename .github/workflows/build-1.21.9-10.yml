@@ -50,7 +50,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: HyperRealistic-Shaders-1.21.9
-          path: build/*.mcpack
+          path: build/*.zip
           retention-days: 30
 
   build-1-21-10:
@@ -87,7 +87,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: HyperRealistic-Shaders-1.21.10
-          path: build/*.mcpack
+          path: build/*.zip
           retention-days: 30
 
   release:
@@ -117,16 +117,16 @@ jobs:
           chmod +x scripts/build.sh
           bash scripts/build.sh 1.21.9
           mkdir -p release-assets
-          for f in build/*.mcpack; do
-            cp "$f" "release-assets/$(basename "${f%.mcpack}")-1.21.9.mcpack"
+          for f in build/*.zip; do
+            cp "$f" "release-assets/$(basename "${f%.zip}")-1.21.9.zip"
           done
 
       - name: Build all variants for 1.21.10
         run: |
           rm -rf build
           bash scripts/build.sh 1.21.10
-          for f in build/*.mcpack; do
-            cp "$f" "release-assets/$(basename "${f%.mcpack}")-1.21.10.mcpack"
+          for f in build/*.zip; do
+            cp "$f" "release-assets/$(basename "${f%.zip}")-1.21.10.zip"
           done
 
       - name: Create Release
@@ -158,7 +158,7 @@ jobs:
             | `Lite` | Performance mode |
 
             ### Installation
-            1. Download the `.mcpack` matching your Minecraft version
+            1. Download the `.zip` matching your Minecraft version
             2. Double-click or import via Minecraft settings
             3. Activate in world resource pack settings
             4. Adjust subpack settings for feature toggles
@@ -169,6 +169,6 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            release-assets/*.mcpack
+            release-assets/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,7 +2,7 @@
 // This shader is from the Shader-mc shader pack.
 // Sun / Moon vertex shader for Minecraft Bedrock Edition.
 
-#include "fragmentVersionCentroid.h"
+#include "vertexVersionCentroid.h"
 
 #if __VERSION__ >= 300
     #ifndef BYPASS_PIXEL_SHADER

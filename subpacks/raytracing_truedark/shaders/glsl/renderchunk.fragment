@@ -1,13 +1,13 @@
 // __multiversion__
-// HyperRealistic Shaders - renderchunk.fragment (Ultra: RT + True Dark)
-// Main terrain/block fragment shader with all visual effects.
-// Supports: ACES tonemap, god rays, ray tracing, bloom, water,
-//           dynamic lights, dynamic shadows, true dark mode.
+// HyperRealistic Shaders - Terrain Fragment Shader
+// Full pipeline: shadows, lights, water, bloom, god rays, ray tracing,
+//   volumetric fog, subsurface scattering, vignette, chromatic aberration,
+//   night eye, color temperature, ACES tone mapping.
 
-#version 100
+#include "fragmentVersionCentroid.h"
 
 // ============================================================
-//  FEATURE TOGGLES - Override these in subpack variants
+//  FEATURE TOGGLES
 // ============================================================
 #define ENABLE_RAYTRACING       1
 #define ENABLE_TRUE_DARK        1
@@ -16,24 +16,68 @@
 #define ENABLE_DYNAMIC_LIGHTS   1
 #define ENABLE_DYNAMIC_SHADOWS  1
 #define ENABLE_WATER_EFFECTS    1
+#define ENABLE_VOLUMETRIC_FOG   1
+#define ENABLE_SUBSURFACE       1
+#define ENABLE_VIGNETTE         1
+#define ENABLE_CHROMATIC_AB     1
+#define ENABLE_NIGHT_EYE        1
+#define ENABLE_COLOR_TEMP       1
 
 // ============================================================
-//  QUALITY / INTENSITY SETTINGS
+//  QUALITY SETTINGS
 // ============================================================
-#define SHADOW_QUALITY      3       // 0=off 1=low 2=med 3=high
-#define BLOOM_INTENSITY     0.35
-#define GODRAY_INTENSITY    0.40
-#define GODRAY_SAMPLES      12
-#define WATER_WAVE_HEIGHT   0.030
-#define TONEMAP_EXPOSURE    1.10
-#define SATURATION_BOOST    1.15
-#define VIBRANCE            0.20
-#define SSR_STEPS           16
+#define SHADOW_QUALITY      3
+#define BLOOM_INTENSITY     0.25
+#define GODRAY_INTENSITY    0.30
+#define GODRAY_SAMPLES      8
+#define TONEMAP_EXPOSURE    1.0
+#define SATURATION_BOOST    1.10
+#define VIBRANCE            0.15
+#define SSR_STEPS           12
 #define SSR_STEP_SIZE       0.05
+#define VIGNETTE_STRENGTH   0.25
+#define CHROMATIC_AB_AMOUNT 0.002
+#define COLOR_TEMP          6500.0
+#define SUBSURFACE_STRENGTH 0.35
+#define NIGHT_EYE_ADAPT     0.25
+#define VOL_FOG_DENSITY     0.010
+#define VOL_FOG_HEIGHT      48.0
 
 // ============================================================
-//  PRECISION
+//  Varyings
 // ============================================================
+#if __VERSION__ >= 300
+    _centroid in lowp vec4 vColor;
+    _centroid in highp vec2 vTexCoord;
+    in highp vec2 vLightmapCoord;
+    in highp vec3 vWorldPos;
+    in highp vec3 vViewPos;
+    in highp float vFogFactor;
+    in highp vec3 vSunDir;
+    in highp float vIsWater;
+    in highp vec3 vNormal;
+    in highp float vCamDist;
+    in highp float vIsVegetation;
+    in highp float vHeightFog;
+    in highp vec3 vWaveNormal;
+    in highp vec2 vScreenPos;
+#else
+    varying lowp vec4 vColor;
+    varying highp vec2 vTexCoord;
+    varying highp vec2 vLightmapCoord;
+    varying highp vec3 vWorldPos;
+    varying highp vec3 vViewPos;
+    varying highp float vFogFactor;
+    varying highp vec3 vSunDir;
+    varying highp float vIsWater;
+    varying highp vec3 vNormal;
+    varying highp float vCamDist;
+    varying highp float vIsVegetation;
+    varying highp float vHeightFog;
+    varying highp vec3 vWaveNormal;
+    varying highp vec2 vScreenPos;
+#endif
+
 #ifdef GL_FRAGMENT_PRECISION_HIGH
     precision highp float;
 #else
@@ -41,183 +85,102 @@
 #endif
 
 // ============================================================
-//  SAMPLERS
+//  Samplers & Uniforms
 // ============================================================
-uniform sampler2D TEXTURE_0;   // terrain atlas
-uniform sampler2D TEXTURE_1;   // lightmap
-
-// ============================================================
-//  UNIFORMS
-// ============================================================
+uniform sampler2D TEXTURE_0;
+uniform sampler2D TEXTURE_1;
 uniform vec4 FOG_COLOR;
 uniform vec2 FOG_CONTROL;
 uniform vec4 CURRENT_COLOR;
 uniform highp float TIME;
 
 // ============================================================
-//  VARYINGS from vertex shader
+//  Constants
 // ============================================================
-varying vec2 vTexCoord;
-varying vec2 vLightmapCoord;
-varying vec4 vColor;
-varying vec3 vWorldPos;
-varying vec3 vViewPos;
-varying float vFogFactor;
-varying vec3 vSunDir;
-varying float vIsWater;
-varying vec3 vNormal;
-varying float vCamDist;
-
-// ============================================================
-//  CONSTANTS
-// ============================================================
-#define PI      3.14159265359
-#define TWO_PI  6.28318530718
+#define PI      3.14159265
 #define EPSILON 0.001
 
-// Warm-coloured dynamic light sources mapped to lightmap.x
 const vec3 TORCH_COLOR     = vec3(1.0, 0.65, 0.30);
-const vec3 LAVA_COLOR      = vec3(1.0, 0.35, 0.08);
 const vec3 GLOWSTONE_COLOR = vec3(1.0, 0.85, 0.55);
-
-// Water palette
-const vec3 WATER_SHALLOW = vec3(0.10, 0.55, 0.65);
-const vec3 WATER_DEEP    = vec3(0.02, 0.12, 0.25);
+const vec3 LAVA_COLOR      = vec3(1.0, 0.35, 0.08);
+const vec3 WATER_SHALLOW   = vec3(0.10, 0.50, 0.60);
+const vec3 WATER_DEEP      = vec3(0.02, 0.10, 0.22);
 
 // ============================================================
-//  HASH / NOISE helpers
+//  Noise
 // ============================================================
 float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
-float hash3(vec3 p) {
-    p = fract(p * vec3(443.897, 441.423, 437.195));
-    p += dot(p, p.yzx + 19.19);
-    return fract((p.x + p.y) * p.z);
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
 float noise2D(vec2 p) {
     vec2 i = floor(p);
     vec2 f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-float fbm(vec2 p) {
-    float v = 0.0;
-    float a = 0.5;
-    for (int i = 0; i < 4; i++) {
-        v += a * noise2D(p);
-        p *= 2.01;
-        a *= 0.5;
-    }
-    return v;
+    return mix(mix(hash(i), hash(i + vec2(1,0)), f.x),
+               mix(hash(i + vec2(0,1)), hash(i + vec2(1,1)), f.x), f.y);
 }
 
 // ============================================================
-//  TIME-OF-DAY helpers
+//  Time-of-day
 // ============================================================
 float getDayFactor() {
-    float brightness = dot(FOG_COLOR.rgb, vec3(0.299, 0.587, 0.114));
-    return smoothstep(0.10, 0.35, brightness);
-}
-
-float getSunsetFactor() {
-    float brightness = dot(FOG_COLOR.rgb, vec3(0.299, 0.587, 0.114));
-    return smoothstep(0.10, 0.20, brightness) * smoothstep(0.45, 0.25, brightness);
+    return smoothstep(0.10, 0.35, dot(FOG_COLOR.rgb, vec3(0.299, 0.587, 0.114)));
 }
 
 // ============================================================
-//  ACES FILMIC TONE MAPPING
+//  ACES Tone Mapping
 // ============================================================
 vec3 acesTonemap(vec3 x) {
-    // Attempt the standard ACES RRT+ODT fit
-    float a = 2.51;
-    float b = 0.03;
-    float c = 2.43;
-    float d = 0.59;
-    float e = 0.14;
+    float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
 // ============================================================
-//  COLOR GRADING
+//  Color Grading
 // ============================================================
-vec3 adjustSaturation(vec3 color, float amount) {
-    float luma = dot(color, vec3(0.299, 0.587, 0.114));
-    return mix(vec3(luma), color, amount);
-}
-
-vec3 applyVibrance(vec3 color, float amount) {
-    float mx = max(color.r, max(color.g, color.b));
-    float mn = min(color.r, min(color.g, color.b));
-    float sat = mx - mn;
-    float boost = amount * (1.0 - sat) * (1.0 - sat);
-    float luma = dot(color, vec3(0.299, 0.587, 0.114));
-    return mix(vec3(luma), color, 1.0 + boost);
-}
-
 vec3 colorGrade(vec3 col) {
-    // Exposure
     col *= TONEMAP_EXPOSURE;
-    // ACES
     col = acesTonemap(col);
     // Saturation
-    col = adjustSaturation(col, SATURATION_BOOST);
-    // Vibrance
-    col = applyVibrance(col, VIBRANCE);
+    float luma = dot(col, vec3(0.299, 0.587, 0.114));
+    col = mix(vec3(luma), col, SATURATION_BOOST);
+    // Vibrance (boost desaturated colors more)
+    float mx = max(col.r, max(col.g, col.b));
+    float mn = min(col.r, min(col.g, col.b));
+    float sat = mx - mn;
+    col = mix(vec3(luma), col, 1.0 + VIBRANCE * (1.0 - sat));
     // Gamma
     col = pow(col, vec3(1.0 / 2.2));
     return col;
 }
 
 // ============================================================
-//  DYNAMIC LIGHTING - block/torch light with color
+//  Dynamic Lighting
 // ============================================================
 #if ENABLE_DYNAMIC_LIGHTS
 vec3 dynamicBlockLight(float blockLight) {
-    // blockLight = vLightmapCoord.x  [0..1]
-    float intensity = pow(blockLight, 2.2) * 1.8;
-
-    // Blend between torch/lava colour based on intensity band
-    vec3 lightColor = mix(TORCH_COLOR, GLOWSTONE_COLOR, smoothstep(0.5, 0.85, blockLight));
-    lightColor = mix(lightColor, LAVA_COLOR, smoothstep(0.85, 1.0, blockLight));
-
-    return lightColor * intensity;
+    float intensity = pow(blockLight, 2.5) * 1.5;
+    vec3 lightCol = mix(TORCH_COLOR, GLOWSTONE_COLOR, smoothstep(0.5, 0.85, blockLight));
+    lightCol = mix(lightCol, LAVA_COLOR, smoothstep(0.85, 1.0, blockLight));
+    return lightCol * intensity;
 }
 #endif
 
 // ============================================================
-//  DYNAMIC SHADOWS using lightmap sky-light channel
+//  Dynamic Shadows
 // ============================================================
 #if ENABLE_DYNAMIC_SHADOWS
 float calculateShadow(vec3 normal, vec3 sunDir, float skyLight, float ao) {
-    // Lambertian diffuse term
     float NdotL = max(dot(normal, sunDir), 0.0);
-
-    // Sky-light occlusion: low skyLight => shadowed (indoors/cave)
-    float skyOcclusion = smoothstep(0.2, 0.85, skyLight);
-
-    // Vertex AO (baked into vertex color brightness)
-    float aoFactor = ao;
-
-    // Combine
-    float shadow = NdotL * skyOcclusion * aoFactor;
+    float skyOcclusion = smoothstep(0.15, 0.80, skyLight);
+    float shadow = NdotL * skyOcclusion * ao;
 
     #if SHADOW_QUALITY >= 2
-        // Soft penumbra approximation
-        shadow = smoothstep(0.05, 0.60, shadow);
+        shadow = smoothstep(0.05, 0.55, shadow);
     #endif
-
     #if SHADOW_QUALITY >= 3
-        // Contact shadow: darken creases using AO and normal curvature
-        float contactDark = (1.0 - ao) * 0.3;
-        shadow = max(shadow - contactDark, 0.0);
+        shadow = max(shadow - (1.0 - ao) * 0.25, 0.0);
     #endif
 
     return shadow;
@@ -225,299 +188,334 @@ float calculateShadow(vec3 normal, vec3 sunDir, float skyLight, float ao) {
 #endif
 
 // ============================================================
-//  BLOOM extraction (HDR bright-pass)
+//  Bloom
 // ============================================================
 #if ENABLE_BLOOM
 vec3 bloomPass(vec3 color) {
     float brightness = dot(color, vec3(0.2126, 0.7152, 0.0722));
-    float knee = 0.6;
-    float soft = brightness - knee;
-    soft = clamp(soft, 0.0, 1.0);
-    soft = soft * soft * (1.0 / (1.0 - knee + EPSILON));
-
-    vec3 bloomColor = color * soft;
-
-    // Cheap gaussian approx: just soften the bloom contribution
-    bloomColor *= BLOOM_INTENSITY;
-    return bloomColor;
+    float soft = clamp(brightness - 0.7, 0.0, 1.0);
+    soft = soft * soft;
+    return color * soft * BLOOM_INTENSITY;
 }
 #endif
 
 // ============================================================
-//  GOD RAYS (screen-space radial blur approximation)
+//  God Rays
 // ============================================================
 #if ENABLE_GODRAYS
-vec3 godRays(vec3 color, vec3 sunDir, vec3 viewDir, float dayFactor) {
+vec3 godRays(vec3 sunDir, vec3 viewDir, float dayFactor) {
     float sunDot = max(dot(viewDir, sunDir), 0.0);
-
-    // Only contribute when looking roughly toward the sun
     float intensity = pow(sunDot, 8.0) * GODRAY_INTENSITY * dayFactor;
 
-    // Accumulate scattered light along the view ray
     float scatter = 0.0;
     for (int i = 0; i < GODRAY_SAMPLES; i++) {
         float t = float(i) / float(GODRAY_SAMPLES);
-        float sampleDot = pow(sunDot, mix(4.0, 64.0, t));
-        scatter += sampleDot;
+        scatter += pow(sunDot, mix(4.0, 64.0, t));
     }
     scatter /= float(GODRAY_SAMPLES);
 
     vec3 sunColor = mix(vec3(1.0, 0.5, 0.2), vec3(1.0, 0.95, 0.85),
                         smoothstep(-0.05, 0.4, sunDir.y));
-
     return sunColor * scatter * intensity;
 }
 #endif
 
 // ============================================================
-//  WATER EFFECTS
+//  Water Effects
 // ============================================================
 #if ENABLE_WATER_EFFECTS
-vec3 waterCaustics(vec2 worldXZ, float t) {
-    vec2 uv = worldXZ * 2.5;
-    float c1 = noise2D(uv + t * 0.4);
-    float c2 = noise2D(uv * 1.7 - t * 0.3);
-    float caustic = pow(c1 * c2, 1.5) * 2.0;
-    return vec3(caustic) * vec3(0.3, 0.6, 0.8);
-}
-
 vec3 waterShading(vec3 baseColor, vec2 worldXZ, vec3 viewDir, vec3 sunDir,
-                  float dayFactor, float t) {
-    // Wave normal calculation
-    float dx = noise2D(worldXZ * 3.0 + vec2(t * 0.5, 0.0)) -
-               noise2D(worldXZ * 3.0 + vec2(t * 0.5 + 0.01, 0.0));
-    float dz = noise2D(worldXZ * 3.0 + vec2(0.0, t * 0.5)) -
-               noise2D(worldXZ * 3.0 + vec2(0.0, t * 0.5 + 0.01));
-    vec3 waveNormal = normalize(vec3(-dx * 8.0, 1.0, -dz * 8.0));
-
-    // Fresnel for reflectivity
+                  vec3 waveNormal, float dayFactor, float t) {
+    // Fresnel
     float fresnel = pow(1.0 - max(dot(viewDir, waveNormal), 0.0), 4.0);
-    fresnel = mix(0.04, 1.0, fresnel);
+    fresnel = mix(0.04, 0.8, fresnel);
 
-    // Water base colour with depth fake
+    // Depth-based color
     float depthFactor = smoothstep(0.0, 0.5, length(viewDir.xz));
     vec3 waterBase = mix(WATER_SHALLOW, WATER_DEEP, depthFactor);
 
-    // Specular highlight from sun
+    // Sun specular on water
     vec3 halfVec = normalize(viewDir + sunDir);
-    float spec = pow(max(dot(waveNormal, halfVec), 0.0), 128.0);
-    vec3 specular = vec3(1.0, 0.95, 0.8) * spec * dayFactor * 2.0;
+    float spec = pow(max(dot(waveNormal, halfVec), 0.0), 96.0);
+    vec3 specular = vec3(1.0, 0.95, 0.85) * spec * dayFactor * 1.5;
 
-    // Caustics on the water surface
-    vec3 caustics = waterCaustics(worldXZ, t);
+    // Animated caustics
+    vec2 uv = worldXZ * 2.5;
+    float c1 = noise2D(uv + t * 0.4);
+    float c2 = noise2D(uv * 1.7 - t * 0.3);
+    vec3 caustics = vec3(pow(c1 * c2, 1.5)) * vec3(0.3, 0.5, 0.7) * dayFactor * 0.4;
 
-    // Foam at shallow edges (approximated by vertex color brightness)
+    // Edge foam
     float foam = smoothstep(0.7, 0.95, dot(baseColor, vec3(0.333)));
-    vec3 foamColor = vec3(0.85, 0.90, 0.95) * foam * 0.4;
+    vec3 foamColor = vec3(0.9, 0.93, 0.97) * foam * 0.3;
 
-    // Compose water
-    vec3 waterColor = waterBase * (1.0 - fresnel * 0.5);
-    waterColor += caustics * dayFactor * 0.5;
-    waterColor += specular;
-    waterColor += foamColor;
+    // Compose
+    vec3 waterColor = waterBase * (1.0 - fresnel * 0.4);
+    waterColor += caustics + specular + foamColor;
 
-    // Blend with underlying texture
-    waterColor = mix(baseColor * waterBase, waterColor, 0.75);
+    // Reflection tint from sky
+    vec3 skyReflect = FOG_COLOR.rgb * fresnel * 0.4 * dayFactor;
+    waterColor += skyReflect;
 
-    return waterColor;
+    return mix(baseColor * waterBase, waterColor, 0.75);
 }
 #endif
 
 // ============================================================
-//  SCREEN-SPACE REFLECTIONS (ray tracing approximation)
+//  Screen-Space Reflections
 // ============================================================
 #if ENABLE_RAYTRACING
-vec3 screenSpaceReflection(vec3 color, vec3 viewDir, vec3 normal,
-                           float reflectivity) {
-    // Reflect view direction around normal
+vec3 screenSpaceReflection(vec3 color, vec3 viewDir, vec3 normal, float reflectivity) {
     vec3 reflDir = reflect(-viewDir, normal);
 
-    // March along reflection ray, sampling the scene approximation
     vec3 reflColor = vec3(0.0);
     float weight = 0.0;
-
     vec3 rayPos = vWorldPos;
+
     for (int i = 0; i < SSR_STEPS; i++) {
         rayPos += reflDir * SSR_STEP_SIZE * float(i + 1);
-
-        // Sample environment approximation from fog color and sky direction
         float skyBlend = smoothstep(-0.1, 0.5, reflDir.y);
-        vec3 envColor = mix(FOG_COLOR.rgb, FOG_COLOR.rgb * 1.5, skyBlend);
-
-        // Add noise-based detail to fake reflected geometry
+        vec3 envColor = mix(FOG_COLOR.rgb * 0.8, FOG_COLOR.rgb * 1.3, skyBlend);
         float detail = noise2D(rayPos.xz * 0.5 + float(i) * 0.1);
         envColor *= (0.7 + 0.3 * detail);
-
         float falloff = 1.0 / (1.0 + float(i) * 0.3);
         reflColor += envColor * falloff;
         weight += falloff;
     }
+    if (weight > 0.0) reflColor /= weight;
 
-    if (weight > 0.0) {
-        reflColor /= weight;
-    }
-
-    return mix(color, reflColor, reflectivity * 0.5);
+    return mix(color, reflColor, reflectivity * 0.4);
 }
 #endif
 
 // ============================================================
-//  TRUE DARK MODE
+//  Subsurface Scattering (vegetation backlight)
+// ============================================================
+#if ENABLE_SUBSURFACE
+vec3 subsurfaceScatter(vec3 color, vec3 viewDir, vec3 sunDir, float dayFactor) {
+    float backlight = pow(max(dot(-viewDir, sunDir), 0.0), 4.0);
+    vec3 sssColor = vec3(0.4, 0.7, 0.15) * backlight * SUBSURFACE_STRENGTH * dayFactor;
+    return color + sssColor;
+}
+#endif
+
+// ============================================================
+//  True Dark
 // ============================================================
 #if ENABLE_TRUE_DARK
-vec3 applyTrueDark(vec3 color, float skyLight, float blockLight) {
-    // In true dark, areas with very low sky + block light go pitch black
+vec3 applyTrueDark(vec3 color, float skyLight, float blockLight, float dayFactor) {
     float totalLight = max(skyLight, blockLight);
     float darkness = smoothstep(0.15, 0.0, totalLight);
-
-    // Reduce ambient to near zero in dark areas
     color *= mix(1.0, 0.02, darkness);
-
-    // Also darken at night when outdoors with no block light
-    float nightDark = (1.0 - getDayFactor()) * (1.0 - blockLight);
-    color *= mix(1.0, 0.15, nightDark * 0.8);
-
+    float nightDark = (1.0 - dayFactor) * (1.0 - blockLight);
+    color *= mix(1.0, 0.12, nightDark * 0.8);
     return color;
 }
 #endif
 
 // ============================================================
-//  MAIN FRAGMENT SHADER
+//  Night Eye Adaptation (scotopic vision)
+// ============================================================
+#if ENABLE_NIGHT_EYE
+vec3 nightEyeAdapt(vec3 color, float dayFactor, float skyLight, float blockLight) {
+    float darkness = (1.0 - dayFactor) * (1.0 - max(skyLight * 0.5, blockLight));
+    // Shift to blue/gray in darkness
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    vec3 nightColor = vec3(luma * 0.6, luma * 0.7, luma * 1.0);
+    // Slight brightness boost to simulate adaptation
+    nightColor *= 1.0 + NIGHT_EYE_ADAPT;
+    return mix(color, nightColor, darkness * 0.5);
+}
+#endif
+
+// ============================================================
+//  Color Temperature (Kelvin white balance)
+// ============================================================
+#if ENABLE_COLOR_TEMP
+vec3 applyColorTemp(vec3 color, float dayFactor) {
+    // Warm during day/sunset, cool at night
+    float temp = mix(5500.0, COLOR_TEMP, dayFactor);
+    vec3 warmShift = vec3(1.04, 1.0, 0.94);   // < 6500K
+    vec3 coolShift = vec3(0.94, 0.97, 1.05);   // > 6500K
+    vec3 shift = mix(warmShift, coolShift, smoothstep(5500.0, 8000.0, temp));
+    return color * shift;
+}
+#endif
+
+// ============================================================
+//  Volumetric Height Fog
+// ============================================================
+#if ENABLE_VOLUMETRIC_FOG
+vec3 applyVolFog(vec3 color, float heightFog, float dayFactor) {
+    vec3 fogColor = mix(vec3(0.05, 0.06, 0.10), vec3(0.7, 0.75, 0.85), dayFactor);
+    // Add slight golden tint near sunset
+    float sunset = dot(FOG_COLOR.rgb, vec3(0.299, 0.587, 0.114));
+    float sunsetFactor = smoothstep(0.1, 0.2, sunset) * smoothstep(0.45, 0.25, sunset);
+    fogColor = mix(fogColor, vec3(0.8, 0.6, 0.35), sunsetFactor * 0.3);
+    return mix(color, fogColor, heightFog * 0.6);
+}
+#endif
+
+// ============================================================
+//  Vignette
+// ============================================================
+#if ENABLE_VIGNETTE
+vec3 applyVignette(vec3 color) {
+    float dist = length(vScreenPos) * 0.7;
+    float vig = 1.0 - smoothstep(0.4, 1.3, dist);
+    return color * mix(1.0 - VIGNETTE_STRENGTH, 1.0, vig);
+}
+#endif
+
+// ============================================================
+//  Chromatic Aberration
+// ============================================================
+#if ENABLE_CHROMATIC_AB
+vec3 applyChromaticAb(vec3 color) {
+    vec2 dir = vScreenPos * CHROMATIC_AB_AMOUNT;
+    float edgeDist = length(vScreenPos);
+    float strength = edgeDist * edgeDist;
+    // Shift R outward, B inward
+    vec2 uvR = vTexCoord + dir * strength;
+    vec2 uvB = vTexCoord - dir * strength;
+    float r = texture2D(TEXTURE_0, uvR).r;
+    float b = texture2D(TEXTURE_0, uvB).b;
+    return vec3(r, color.g, b) * vColor.rgb;
+}
+#endif
+
+// ============================================================
+//  MAIN
 // ============================================================
 void main() {
-    // --------------------------------------------------------
-    //  Base texture sample
-    // --------------------------------------------------------
+#ifdef BYPASS_PIXEL_SHADER
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+    return;
+#endif
+
+    // ---- Base texture ----
     vec4 texColor = texture2D(TEXTURE_0, vTexCoord);
 
     #ifdef ALPHA_TEST
         if (texColor.a < 0.5) discard;
     #endif
 
-    vec3 color = texColor.rgb;
+    vec3 color = texColor.rgb * vColor.rgb;
 
-    // Apply vertex color (biome tint, ambient occlusion)
-    color *= vColor.rgb;
-
-    // --------------------------------------------------------
-    //  Lightmap data
-    //  x = block light (torches, etc.)  y = sky light
-    // --------------------------------------------------------
+    // ---- Lightmap ----
     float blockLight = vLightmapCoord.x;
     float skyLight   = vLightmapCoord.y;
-
-    // Vertex AO from vertex color luminance
     float ao = dot(vColor.rgb, vec3(0.299, 0.587, 0.114));
 
-    // Day/night factor
-    float dayFactor   = getDayFactor();
-    float nightFactor = 1.0 - dayFactor;
-
-    // Normalised view direction (camera to fragment)
+    float dayFactor = getDayFactor();
     vec3 viewDir = normalize(-vViewPos);
 
-    // --------------------------------------------------------
-    //  DYNAMIC SHADOWS
-    // --------------------------------------------------------
+    // ---- DYNAMIC SHADOWS ----
     #if ENABLE_DYNAMIC_SHADOWS
         float shadow = calculateShadow(vNormal, vSunDir, skyLight, ao);
-        // Sunlight contribution
-        vec3 sunColor = mix(vec3(1.0, 0.5, 0.25), vec3(1.0, 0.95, 0.85),
+        vec3 sunColor = mix(vec3(1.0, 0.55, 0.25), vec3(1.0, 0.95, 0.85),
                            smoothstep(-0.05, 0.3, vSunDir.y));
-        vec3 sunlight = sunColor * shadow * dayFactor * 0.8;
+        vec3 sunlight = sunColor * shadow * dayFactor * 0.7;
 
-        // Ambient light (reduced when shadowed)
-        vec3 ambient = mix(vec3(0.06, 0.08, 0.14), vec3(0.25, 0.28, 0.35), dayFactor);
-        ambient *= mix(0.5, 1.0, ao);
+        // Ambient (sky bounce light)
+        vec3 ambient = mix(vec3(0.05, 0.06, 0.12), vec3(0.20, 0.22, 0.28), dayFactor);
+        ambient *= mix(0.6, 1.0, ao);
+        // Sky light contribution to ambient
+        ambient += vec3(0.08, 0.10, 0.15) * skyLight * dayFactor;
 
         color *= (ambient + sunlight);
     #else
-        // Simple lightmap-based lighting when shadows disabled
         float lightLevel = max(skyLight * dayFactor, blockLight);
-        color *= mix(vec3(0.08), vec3(1.0), lightLevel);
+        color *= mix(vec3(0.06), vec3(1.0), lightLevel);
     #endif
 
-    // --------------------------------------------------------
-    //  DYNAMIC BLOCK LIGHTING (torches, lava, glowstone)
-    // --------------------------------------------------------
+    // ---- DYNAMIC BLOCK LIGHTS ----
     #if ENABLE_DYNAMIC_LIGHTS
-        vec3 blockLightColor = dynamicBlockLight(blockLight);
-        color += color * blockLightColor;
+        vec3 blColor = dynamicBlockLight(blockLight);
+        color += color * blColor;
     #endif
 
-    // --------------------------------------------------------
-    //  WATER EFFECTS
-    // --------------------------------------------------------
+    // ---- SUBSURFACE SCATTERING (vegetation) ----
+    #if ENABLE_SUBSURFACE
+        if (vIsVegetation > 0.5) {
+            color = subsurfaceScatter(color, viewDir, vSunDir, dayFactor);
+        }
+    #endif
+
+    // ---- WATER EFFECTS ----
     #if ENABLE_WATER_EFFECTS
         if (vIsWater > 0.5) {
             color = waterShading(color, vWorldPos.xz, viewDir, vSunDir,
-                                dayFactor, TIME);
+                                vWaveNormal, dayFactor, TIME);
         }
     #endif
 
-    // --------------------------------------------------------
-    //  SCREEN-SPACE RAY TRACING (reflections)
-    // --------------------------------------------------------
+    // ---- SCREEN-SPACE RAY TRACING ----
     #if ENABLE_RAYTRACING
     {
-        // Reflectivity: water is very reflective, wet/smooth blocks slightly
         float reflectivity = 0.0;
-
         if (vIsWater > 0.5) {
-            // Fresnel-based water reflectivity
             float fresnel = pow(1.0 - max(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0), 3.0);
-            reflectivity = mix(0.15, 0.85, fresnel);
+            reflectivity = mix(0.12, 0.7, fresnel);
         } else {
-            // Slight reflection on rain-wet surfaces (sky light high = outdoors)
-            reflectivity = skyLight * dayFactor * 0.04;
+            reflectivity = skyLight * dayFactor * 0.03;
         }
-
         if (reflectivity > 0.01) {
-            vec3 reflNormal = vIsWater > 0.5 ? vec3(0.0, 1.0, 0.0) : vNormal;
-            color = screenSpaceReflection(color, viewDir, reflNormal, reflectivity);
+            vec3 rn = vIsWater > 0.5 ? vWaveNormal : vNormal;
+            color = screenSpaceReflection(color, viewDir, rn, reflectivity);
         }
     }
     #endif
 
-    // --------------------------------------------------------
-    //  GOD RAYS (volumetric light shafts)
-    // --------------------------------------------------------
+    // ---- GOD RAYS ----
     #if ENABLE_GODRAYS
-    {
-        vec3 rays = godRays(color, vSunDir, viewDir, dayFactor);
-        color += rays;
-    }
+        color += godRays(vSunDir, viewDir, dayFactor);
     #endif
 
-    // --------------------------------------------------------
-    //  BLOOM (HDR bright extraction)
-    // --------------------------------------------------------
+    // ---- BLOOM ----
     #if ENABLE_BLOOM
-    {
-        vec3 bloom = bloomPass(color);
-        color += bloom;
-    }
+        color += bloomPass(color);
     #endif
 
-    // --------------------------------------------------------
-    //  TRUE DARK MODE
-    // --------------------------------------------------------
+    // ---- NIGHT EYE ----
+    #if ENABLE_NIGHT_EYE
+        color = nightEyeAdapt(color, dayFactor, skyLight, blockLight);
+    #endif
+
+    // ---- TRUE DARK ----
     #if ENABLE_TRUE_DARK
-        color = applyTrueDark(color, skyLight, blockLight);
+        color = applyTrueDark(color, skyLight, blockLight, dayFactor);
     #endif
 
-    // --------------------------------------------------------
-    //  FINAL COLOR GRADING (ACES, saturation, gamma)
-    // --------------------------------------------------------
+    // ---- COLOR TEMPERATURE ----
+    #if ENABLE_COLOR_TEMP
+        color = applyColorTemp(color, dayFactor);
+    #endif
+
+    // ---- COLOR GRADING (ACES tonemap + gamma) ----
     color = colorGrade(color);
 
-    // --------------------------------------------------------
-    //  FOG BLENDING
-    // --------------------------------------------------------
+    // ---- VOLUMETRIC FOG ----
+    #if ENABLE_VOLUMETRIC_FOG
+        color = applyVolFog(color, vHeightFog, dayFactor);
+    #endif
+
+    // ---- CHROMATIC ABERRATION ----
+    #if ENABLE_CHROMATIC_AB
+        // Only at screen edges for subtle effect
+        if (length(vScreenPos) > 0.3) {
+            color = applyChromaticAb(color);
+        }
+    #endif
+
+    // ---- VIGNETTE ----
+    #if ENABLE_VIGNETTE
+        color = applyVignette(color);
+    #endif
+
+    // ---- DISTANCE FOG ----
     color = mix(color, FOG_COLOR.rgb, vFogFactor);
 
-    // --------------------------------------------------------
-    //  OUTPUT
-    // --------------------------------------------------------
+    // ---- OUTPUT ----
     gl_FragColor = vec4(color, texColor.a * vColor.a);
 }

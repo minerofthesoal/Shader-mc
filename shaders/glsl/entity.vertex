@@ -3,7 +3,7 @@
 // Entity vertex shader for Minecraft Bedrock Edition.
 // Handles mobs, items, armor stands, and other world entities.
 
-#include "fragmentVersionCentroid.h"
+#include "vertexVersionCentroid.h"
 
 #if __VERSION__ >= 300
     #ifndef BYPASS_PIXEL_SHADER

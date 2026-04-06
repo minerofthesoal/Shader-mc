@@ -3,7 +3,7 @@
 // Rain/snow particle vertex shader for Minecraft Bedrock Edition.
 // Standard passthrough with fog calculation for weather particles.
 
-#include "fragmentVersionCentroid.h"
+#include "vertexVersionCentroid.h"
 
 #if __VERSION__ >= 300
     #ifndef BYPASS_PIXEL_SHADER
