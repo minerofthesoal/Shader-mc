@@ -18,12 +18,12 @@ uniform float rainStrength;
 const float PI = 3.14159265359;
 const float TAU = 6.28318530718;
 
-// Rayleigh scattering coefficients (wavelength-dependent)
-const vec3 RAYLEIGH_COEFF = vec3(5.8e-6, 13.5e-6, 33.1e-6);
-// Mie scattering coefficient
-const float MIE_COEFF = 21.0e-6;
+// Photon-style scattering coefficients — slightly less blue-heavy for natural sky
+const vec3 RAYLEIGH_COEFF = vec3(5.5e-6, 13.0e-6, 30.0e-6);
+// Mie scattering coefficient — subtle atmospheric haze
+const float MIE_COEFF = 18.0e-6;
 // Mie preferred scattering direction (asymmetry factor)
-const float MIE_G = 0.76;
+const float MIE_G = 0.80;
 
 const float ATMOSPHERE_RADIUS = 6471e3;
 const float PLANET_RADIUS     = 6371e3;
@@ -135,9 +135,9 @@ vec3 atmosphericScattering(vec3 dir, vec3 sunDir) {
     // Extinction (light absorbed along path)
     vec3 extinction = exp(-(RAYLEIGH_COEFF * opticalDepthR + MIE_COEFF * opticalDepthM));
 
-    // Sun intensity based on altitude (atmospheric absorption at horizon)
-    float sunIntensity = max(sunAlt + 0.15, 0.0);
-    sunIntensity = pow(sunIntensity, 0.4) * 22.0;
+    // Photon-style: moderate sun intensity for natural sky brightness
+    float sunIntensity = max(sunAlt + 0.1, 0.0);
+    sunIntensity = pow(sunIntensity, 0.5) * 18.0;
 
     // Combined scattered light
     vec3 scatter = (rayleigh + mie) * sunIntensity;
@@ -160,18 +160,18 @@ vec3 sunsetColors(vec3 dir, vec3 sunDir) {
     float sunProximity = max(dot(flatDir, flatSun), 0.0);
     sunProximity = pow(sunProximity, 2.0);
 
-    // Warm sunset gradient
+    // Photon-style: warm but not oversaturated sunset
     vec3 warmColor = mix(
-        vec3(1.0, 0.3, 0.05),   // Deep orange-red at horizon
-        vec3(1.0, 0.6, 0.2),    // Lighter orange higher up
+        vec3(0.9, 0.35, 0.10),  // Warm orange at horizon
+        vec3(0.95, 0.6, 0.3),   // Soft peach higher up
         smoothstep(0.0, 0.25, abs(dir.y))
     );
 
-    // Purple-pink opposite side
-    vec3 coolColor = vec3(0.4, 0.2, 0.6);
+    // Subtle purple-blue opposite side
+    vec3 coolColor = vec3(0.3, 0.2, 0.45);
     vec3 color = mix(coolColor, warmColor, sunProximity);
 
-    return color * sunsetFactor * horizonMask * 3.0;
+    return color * sunsetFactor * horizonMask * 2.0;
 }
 
 // ----- Procedural Stars -----
@@ -362,7 +362,7 @@ vec3 renderAurora(vec3 dir) {
     // Fade with rain
     aurora *= (1.0 - rainStrength);
 
-    return aurora * nightFactor * 1.5;
+    return aurora * nightFactor * 0.8;
 }
 
 // ----- Main -----
@@ -406,15 +406,15 @@ void main() {
     // ---- Aurora Borealis ----
     sky += renderAurora(dir);
 
-    // ---- Sun glow in atmosphere ----
+    // ---- Sun glow (Photon-style: clean, not overdone) ----
     float sunGlow = max(dot(dir, sunDir), 0.0);
-    sky += vec3(1.0, 0.9, 0.7) * pow(sunGlow, 128.0) * 4.0 * dayFactor;
-    sky += vec3(1.0, 0.7, 0.4) * pow(sunGlow, 16.0) * 0.5 * dayFactor;
+    sky += vec3(1.0, 0.95, 0.85) * pow(sunGlow, 200.0) * 3.0 * dayFactor;  // tight core
+    sky += vec3(0.95, 0.80, 0.55) * pow(sunGlow, 24.0) * 0.3 * dayFactor;  // soft halo
 
-    // Moon glow at night
+    // Moon glow (subtle)
     float moonGlow = max(dot(dir, moonDir), 0.0);
-    sky += vec3(0.2, 0.25, 0.4) * pow(moonGlow, 64.0) * 2.0 * nightFactor;
-    sky += vec3(0.15, 0.18, 0.3) * pow(moonGlow, 8.0) * 0.3 * nightFactor;
+    sky += vec3(0.2, 0.25, 0.35) * pow(moonGlow, 80.0) * 1.5 * nightFactor;
+    sky += vec3(0.10, 0.12, 0.20) * pow(moonGlow, 10.0) * 0.2 * nightFactor;
 
     // ---- Horizon fog blending ----
     float horizonFog = 1.0 - smoothstep(0.0, 0.15, abs(dir.y));
@@ -424,14 +424,9 @@ void main() {
     // Rain darkening
     sky = mix(sky, fogColor * 0.4, rainStrength * 0.7);
 
-    // ---- Tone mapping (simple Reinhard) ----
-    sky = sky / (1.0 + sky);
-
-    // Gamma correction (linear -> sRGB)
-    sky = pow(sky, vec3(1.0 / 2.2));
-
-    // Clamp
-    sky = clamp(sky, 0.0, 1.0);
+    // Output linear HDR — let composite/final passes handle tonemapping
+    // Just clamp to reasonable range to prevent fireflies
+    sky = max(sky, vec3(0.0));
 
     gl_FragColor = vec4(sky, 1.0);
 }

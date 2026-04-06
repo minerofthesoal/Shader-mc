@@ -42,8 +42,9 @@ void main() {
     // -- Lightmap contribution ------------------------------------------------
     // Sample the vanilla lightmap and apply it lightly so deferred lighting
     // can still do the heavy lifting.
+    // Photon-style: light lightmap tinting, let deferred pass do the heavy lifting
     vec3 lmColor = texture2D(lightmap, lmcoord).rgb;
-    vec3 litAlbedo = albedo.rgb * mix(vec3(1.0), lmColor, 0.35);
+    vec3 litAlbedo = albedo.rgb * mix(vec3(1.0), lmColor, 0.25);
 
     // -- MRT output 0: colour -------------------------------------------------
     gl_FragData[0] = vec4(litAlbedo, albedo.a);

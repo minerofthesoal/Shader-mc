@@ -1,21 +1,20 @@
 #version 120
 // =============================================================================
-// final.fsh - Final output pass
+// final.fsh - Final output pass (Photon-style clean PBR look)
 //
-// Applies all screen-level post-processing: color temperature, ACES tone
-// mapping, saturation/vibrance, vignette, chromatic aberration, gamma
-// correction, and film grain.
+// Clean tone mapping with natural color grading. No heavy post-processing
+// artifacts — prioritizes physical accuracy and natural appearance.
 // =============================================================================
 
 // ---------------------------------------------------------------------------
 // Feature toggles
 // ---------------------------------------------------------------------------
 #define EXPOSURE 1.0            // [0.5 0.7 0.8 0.9 1.0 1.1 1.2 1.5 2.0]
-#define SATURATION 1.1          // [0.5 0.7 0.8 0.9 1.0 1.1 1.2 1.3 1.5]
+#define SATURATION 1.05         // [0.5 0.7 0.8 0.9 1.0 1.05 1.1 1.2 1.3]
 #define COLOR_TEMPERATURE 6500  // [3000 4000 5000 5500 6000 6500 7000 8000 10000]
-#define VIGNETTE
-#define VIGNETTE_AMOUNT 0.25    // [0.1 0.15 0.2 0.25 0.3 0.4 0.5]
-#define CHROMATIC_ABERRATION
+//#define VIGNETTE              // Disabled by default for clean Photon look
+#define VIGNETTE_AMOUNT 0.15    // [0.1 0.15 0.2 0.25 0.3 0.4 0.5]
+//#define CHROMATIC_ABERRATION  // Disabled — Photon doesn't use it
 #define NIGHT_EYE
 
 // ---------------------------------------------------------------------------
@@ -40,19 +39,11 @@ float luminance(vec3 color) {
 
 // ---------------------------------------------------------------------------
 // 1) Color Temperature (Kelvin-based white balance)
-//
-// Attempt to approximate the color of a blackbody radiator at the given
-// temperature in Kelvin. D65 (6500K) is neutral. Lower values are warmer
-// (more orange), higher values are cooler (more blue).
-//
-// Based on Tanner Helland's approximation:
-// http://www.tannerhelland.com/4435/convert-temperature-rgb-algorithm-code/
 // ---------------------------------------------------------------------------
 vec3 colorTemperature(float kelvin) {
     float temp = kelvin / 100.0;
     vec3 result;
 
-    // Red channel
     if (temp <= 66.0) {
         result.r = 1.0;
     } else {
@@ -61,7 +52,6 @@ vec3 colorTemperature(float kelvin) {
         result.r = clamp(r / 255.0, 0.0, 1.0);
     }
 
-    // Green channel
     if (temp <= 66.0) {
         float g = temp;
         g = 99.4708025861 * log(g) - 161.1195681661;
@@ -72,7 +62,6 @@ vec3 colorTemperature(float kelvin) {
         result.g = clamp(g / 255.0, 0.0, 1.0);
     }
 
-    // Blue channel
     if (temp >= 66.0) {
         result.b = 1.0;
     } else if (temp <= 19.0) {
@@ -87,104 +76,72 @@ vec3 colorTemperature(float kelvin) {
 }
 
 vec3 applyColorTemperature(vec3 color) {
-    // Get the tint for the target temperature relative to D65
     vec3 targetTint  = colorTemperature(float(COLOR_TEMPERATURE));
     vec3 neutralTint = colorTemperature(6500.0);
-
-    // Ratio of target to neutral gives us the correction multiplier
     vec3 correction = targetTint / max(neutralTint, vec3(0.001));
-
     return color * correction;
 }
 
 // ---------------------------------------------------------------------------
-// 2) ACES Filmic Tone Mapping
+// 2) Tone Mapping — Photon-style clean ACES
 //
-// Standard ACES approximation fit by Stephen Hill. Maps HDR linear values
-// to LDR with a pleasing S-curve that preserves highlights and shadows.
+// Modified ACES curve with slightly lifted shadows and softer highlight
+// rolloff for a more natural, less contrasty look typical of Photon.
 // ---------------------------------------------------------------------------
 vec3 acesFilm(vec3 x) {
-    // Apply exposure before tone mapping
     x *= EXPOSURE;
 
-    // ACES fitted curve (sRGB monitor transform approximation)
+    // Softer ACES curve — less aggressive contrast than standard
+    // Lifted toe (shadows not crushed), gentle shoulder (highlights preserved)
     float a = 2.51;
     float b = 0.03;
     float c = 2.43;
     float d = 0.59;
     float e = 0.14;
 
-    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    vec3 mapped = clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+
+    // Photon-style: slightly lift shadows to avoid crushing blacks
+    // This gives a more natural, less contrasty look
+    mapped = mix(mapped, sqrt(mapped), 0.08);
+
+    return mapped;
 }
 
 // ---------------------------------------------------------------------------
-// 3) Saturation + Vibrance
-//
-// Adjusts color saturation uniformly, then applies vibrance which boosts
-// less-saturated colors more than already-saturated ones. This prevents
-// over-saturation of already vivid colors while enriching dull areas.
+// 3) Saturation — very subtle, Photon keeps colors natural
 // ---------------------------------------------------------------------------
 vec3 applySaturation(vec3 color) {
     float lum = luminance(color);
     vec3 grey = vec3(lum);
-
-    // Basic saturation adjustment
-    vec3 saturated = mix(grey, color, SATURATION);
-
-    // Vibrance: boost desaturated colors more
-    float currentSat = length(color - grey);
-    float vibranceBoost = 1.0 - smoothstep(0.0, 0.5, currentSat);
-    float vibranceAmount = 0.15; // subtle
-    saturated = mix(saturated, color * (1.0 + vibranceAmount), vibranceBoost * vibranceAmount);
-
-    return max(saturated, vec3(0.0));
+    return max(mix(grey, color, SATURATION), vec3(0.0));
 }
 
 // ---------------------------------------------------------------------------
-// 4) Vignette
-//
-// Darkens the edges and corners of the screen with a smooth circular
-// falloff. Creates a subtle focus-on-center effect common in photography.
+// 4) Vignette (subtle if enabled)
 // ---------------------------------------------------------------------------
 #ifdef VIGNETTE
 vec3 applyVignette(vec3 color, vec2 uv) {
-    // Distance from center (0,0 at center, ~0.707 at corners)
     vec2 centered = uv - 0.5;
-
-    // Correct for aspect ratio so the vignette is circular, not elliptical
     float aspect = viewWidth / viewHeight;
     centered.x *= aspect;
-
     float dist = length(centered);
-
-    // Smooth falloff from center to edges
-    float vignette = smoothstep(0.9, 0.4, dist * (1.0 + VIGNETTE_AMOUNT));
+    float vignette = smoothstep(1.0, 0.4, dist * (1.0 + VIGNETTE_AMOUNT));
     vignette = mix(1.0, vignette, VIGNETTE_AMOUNT);
-
     return color * vignette;
 }
 #endif
 
 // ---------------------------------------------------------------------------
-// 5) Chromatic Aberration
-//
-// Simulates the prismatic color fringing of imperfect lenses by sampling
-// each RGB channel at slightly offset UV coordinates. The offset increases
-// toward the screen edges for a realistic look.
+// 5) Chromatic Aberration (disabled by default for Photon style)
 // ---------------------------------------------------------------------------
 #ifdef CHROMATIC_ABERRATION
 vec3 applyChromaticAberration(vec2 uv) {
-    // Direction from center
     vec2 centered = uv - 0.5;
     float dist = length(centered);
+    float strength = dist * dist * 0.002;
+    vec2 dir = normalize(centered + vec2(0.0001));
 
-    // Offset strength increases toward edges (quadratic falloff)
-    float strength = dist * dist * 0.003;
-
-    // Offset direction is radial from center
-    vec2 dir = normalize(centered + vec2(0.0001)); // avoid zero
-
-    // Sample each channel at different offsets
     vec2 uvR = uv + dir * strength;
     vec2 uvG = uv;
     vec2 uvB = uv - dir * strength;
@@ -199,49 +156,17 @@ vec3 applyChromaticAberration(vec2 uv) {
 
 // ---------------------------------------------------------------------------
 // 6) Gamma Correction (Linear to sRGB)
-//
-// Converts from linear color space to sRGB gamma for correct display on
-// standard monitors. Uses the official sRGB piecewise transfer function.
 // ---------------------------------------------------------------------------
 vec3 linearToSRGB(vec3 linear) {
-    // Simplified gamma curve (close enough to sRGB for games)
     return pow(linear, vec3(1.0 / 2.2));
-}
-
-// ---------------------------------------------------------------------------
-// 7) Film Grain
-//
-// Adds very subtle luminance noise to simulate analog film grain. This
-// helps break up color banding in gradients and adds a cinematic quality.
-// The grain is animated per-frame so it shimmers naturally.
-// ---------------------------------------------------------------------------
-vec3 applyFilmGrain(vec3 color, vec2 uv) {
-    // Hash-based noise: fast and screen-space
-    float noise = fract(sin(dot(uv * vec2(viewWidth, viewHeight) +
-                    vec2(frameTimeCounter * 143.0, frameTimeCounter * 67.0),
-                    vec2(12.9898, 78.233))) * 43758.5453);
-
-    // Center the noise around 0 (-0.5 to +0.5)
-    noise = noise - 0.5;
-
-    // Very subtle: barely perceptible grain
-    float grainStrength = 0.025;
-
-    // Reduce grain in bright areas (more visible in shadows, like real film)
-    float lum = luminance(color);
-    float shadowBias = mix(1.0, 0.3, smoothstep(0.0, 0.5, lum));
-
-    return color + vec3(noise * grainStrength * shadowBias);
 }
 
 // ==========================================================================
 // Main
 // ==========================================================================
 void main() {
-    // ---- Sample scene color ----
     vec3 color;
 
-    // If chromatic aberration is on, use offset sampling from the start
     #ifdef CHROMATIC_ABERRATION
         color = applyChromaticAberration(texcoord);
     #else
@@ -251,10 +176,10 @@ void main() {
     // ---- 1) Color temperature ----
     color = applyColorTemperature(color);
 
-    // ---- 2) ACES filmic tone mapping with exposure ----
+    // ---- 2) Tone mapping ----
     color = acesFilm(color);
 
-    // ---- 3) Saturation and vibrance ----
+    // ---- 3) Saturation (subtle) ----
     color = applySaturation(color);
 
     // ---- 4) Vignette ----
@@ -262,17 +187,12 @@ void main() {
         color = applyVignette(color, texcoord);
     #endif
 
-    // ---- 6) Gamma correction (linear to sRGB) ----
+    // ---- 5) Gamma correction ----
     color = linearToSRGB(color);
 
-    // ---- 7) Film grain (applied after gamma for perceptual uniformity) ----
-    color = applyFilmGrain(color, texcoord);
+    // No film grain — clean Photon-style output
 
-    // ---- Final clamp to valid range ----
     color = clamp(color, 0.0, 1.0);
 
-    // ================================================================
-    // Output: final pixel color to the screen
-    // ================================================================
     gl_FragColor = vec4(color, 1.0);
 }

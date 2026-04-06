@@ -12,13 +12,13 @@
 #define SHADOWS
 #define DYNAMIC_LIGHTS
 #define GODRAYS
-#define GODRAY_STRENGTH 0.4    // [0.1 0.2 0.3 0.4 0.5 0.6 0.8 1.0]
+#define GODRAY_STRENGTH 0.25   // [0.1 0.15 0.2 0.25 0.3 0.4 0.5 0.6]
 #define SHADOW_QUALITY 2       // [0 1 2]
 #define TRUE_DARK
 #define VOLUMETRIC_FOG
 #define SUBSURFACE_SCATTERING
 #define BLOOM
-#define BLOOM_AMOUNT 0.15      // [0.1 0.15 0.2 0.25 0.3 0.4 0.5]
+#define BLOOM_AMOUNT 0.10      // [0.05 0.08 0.1 0.15 0.2 0.25 0.3]
 
 // ---------------------------------------------------------------------------
 // Varyings
@@ -70,9 +70,9 @@ const int   GODRAY_SAMPLES   = 16;
 const float GODRAY_DECAY     = 0.96;
 const float GODRAY_DENSITY   = 1.0;
 
-const float BLOOM_THRESHOLD  = 0.75;
+const float BLOOM_THRESHOLD  = 0.85;
 
-const float SSS_STRENGTH     = 0.45;
+const float SSS_STRENGTH     = 0.30;
 
 // ---------------------------------------------------------------------------
 // Helper: Luminance
@@ -214,17 +214,17 @@ vec3 computeShadow(vec3 viewPos, float NdotL) {
 // ---------------------------------------------------------------------------
 #ifdef DYNAMIC_LIGHTS
 vec3 computeDynamicLight(float blockLight) {
-    // Smooth the lightmap value with gentler falloff
-    float light = pow(blockLight, 1.8);
+    // Photon-style: smooth quadratic falloff
+    float light = pow(blockLight, 2.0);
 
-    // Warm torch color palette: orange-yellow at full brightness
-    vec3 torchColor = vec3(1.0, 0.65, 0.30);
+    // Warm but not orange — Photon uses a more natural warm white
+    vec3 torchColor = vec3(1.0, 0.75, 0.45);
 
-    // Mix toward a slightly cooler tone at lower intensities
-    vec3 dimTorch = vec3(0.85, 0.50, 0.20);
+    // Cooler at low intensities for natural falloff
+    vec3 dimTorch = vec3(0.9, 0.60, 0.35);
     vec3 finalTorch = mix(dimTorch, torchColor, light);
 
-    return finalTorch * light * 1.5;
+    return finalTorch * light * 1.4;
 }
 #endif
 
@@ -286,8 +286,8 @@ vec3 computeGodRays(vec2 uv, vec3 sceneColor) {
 
     illumination /= float(GODRAY_SAMPLES);
 
-    // Sun color tint (warm golden during day)
-    vec3 rayColor = mix(vec3(0.8, 0.85, 1.0), vec3(1.0, 0.9, 0.7), dayFactor);
+    // Photon-style: clean warm-white rays, not overly golden
+    vec3 rayColor = mix(vec3(0.7, 0.75, 0.9), vec3(0.95, 0.90, 0.80), dayFactor);
 
     // Reduce in rain
     float rainFade = 1.0 - rainStrength * 0.7;
@@ -340,9 +340,9 @@ vec3 computeVolumetricFog(vec3 color, vec3 worldPos, float depth) {
     float heightFactor = 1.0 - smoothstep(40.0, 120.0, worldY);
     heightFactor = max(heightFactor, 0.05); // minimum fog everywhere
 
-    // Distance-based density with exponential falloff
-    float fogDensity = 1.0 - exp(-dist * 0.003 * heightFactor);
-    fogDensity = clamp(fogDensity, 0.0, 0.85);
+    // Photon-style: gentle distance fog, not too thick
+    float fogDensity = 1.0 - exp(-dist * 0.002 * heightFactor);
+    fogDensity = clamp(fogDensity, 0.0, 0.70);
 
     // Animated noise for organic movement
     vec2 noiseUV = worldPos.xz * 0.002 + vec2(frameTimeCounter * 0.01);
@@ -353,10 +353,10 @@ vec3 computeVolumetricFog(vec3 color, vec3 worldPos, float depth) {
     // Increase fog in rain
     fogDensity = mix(fogDensity, min(fogDensity * 2.0, 0.9), rainStrength);
 
-    // Fog color based on time of day
-    vec3 dayFogColor   = vec3(0.70, 0.80, 0.95);
-    vec3 nightFogColor = vec3(0.04, 0.05, 0.08);
-    vec3 duskFogColor  = vec3(0.90, 0.60, 0.40);
+    // Photon-style: clean atmospheric fog colors
+    vec3 dayFogColor   = vec3(0.65, 0.75, 0.90);   // soft blue haze
+    vec3 nightFogColor = vec3(0.02, 0.025, 0.05);   // deep blue-black
+    vec3 duskFogColor  = vec3(0.80, 0.55, 0.35);   // warm but muted sunset
 
     // Time interpolation
     float dayAmount  = 0.0;
@@ -511,14 +511,14 @@ void main() {
         #ifdef SHADOWS
             shadowFactor = computeShadow(viewPos, NdotL);
 
-            // Apply shadow to scene color
-            // Use skyLight to determine how much shadow matters
-            // (underground areas without sky access don't receive sun shadows)
+            // Apply shadow with sky-light-based influence
             float shadowInfluence = smoothstep(0.0, 0.3, skyLight);
             vec3 shadowed = finalColor * mix(vec3(1.0), shadowFactor, shadowInfluence);
 
-            // Ambient fill so shadows aren't fully black
-            vec3 ambientColor = finalColor * 0.08;
+            // Photon-style ambient: blue-tinted sky bounce light in shadows
+            // This gives shadows a natural cool tone instead of just being dark
+            vec3 ambientTint = vec3(0.6, 0.7, 1.0); // cool sky bounce
+            vec3 ambientColor = finalColor * 0.12 * ambientTint;
             finalColor = max(shadowed, ambientColor * shadowInfluence);
         #endif
 

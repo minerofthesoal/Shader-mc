@@ -42,54 +42,35 @@ void main() {
     vec2 centerOffset = texcoord - vec2(0.5);
     float distFromCenter = length(centerOffset);
 
-    // ---- Sun Corona Glow ----
+    // ---- Sun (Photon-style: clean, bright, no lens flare artifacts) ----
     if (isSun > 0.5) {
-        // Soft radial glow extending beyond the sun disc
-        float corona = 1.0 / (1.0 + pow(distFromCenter * 4.0, 2.0));
-        corona *= smoothstep(0.5, 0.15, distFromCenter);
+        // Soft radial glow — clean and natural
+        float corona = 1.0 / (1.0 + pow(distFromCenter * 5.0, 2.0));
+        corona *= smoothstep(0.45, 0.12, distFromCenter);
         vec3 coronaColor = mix(
-            vec3(1.0, 0.95, 0.8),    // White-yellow center
-            vec3(1.0, 0.6, 0.2),     // Orange edge
-            smoothstep(0.1, 0.4, distFromCenter)
+            vec3(1.0, 0.97, 0.90),   // Near-white center
+            vec3(1.0, 0.80, 0.50),   // Warm edge
+            smoothstep(0.08, 0.35, distFromCenter)
         );
-        tex.rgb += coronaColor * corona * 0.6;
+        tex.rgb += coronaColor * corona * 0.4;
 
-        // Inner glow - hot white core
-        float innerGlow = smoothstep(0.2, 0.0, distFromCenter);
-        tex.rgb += vec3(1.0, 0.98, 0.95) * innerGlow * 0.4;
+        // Clean bright core
+        float innerGlow = smoothstep(0.15, 0.0, distFromCenter);
+        tex.rgb += vec3(1.0, 0.98, 0.95) * innerGlow * 0.3;
 
-        // ---- Lens Flare Rings ----
-        // Ring 1
-        float ring1 = abs(distFromCenter - 0.25);
-        ring1 = smoothstep(0.02, 0.0, ring1);
-        tex.rgb += vec3(1.0, 0.85, 0.5) * ring1 * 0.15;
-
-        // Ring 2 (larger, dimmer)
-        float ring2 = abs(distFromCenter - 0.38);
-        ring2 = smoothstep(0.015, 0.0, ring2);
-        tex.rgb += vec3(0.8, 0.7, 1.0) * ring2 * 0.08;
-
-        // Subtle chromatic fringe
-        float fringe = abs(distFromCenter - 0.32);
-        float fringeR = smoothstep(0.02, 0.0, fringe - 0.005);
-        float fringeB = smoothstep(0.02, 0.0, fringe + 0.005);
-        tex.rgb += vec3(fringeR * 0.05, 0.0, fringeB * 0.05);
+        // No lens flare rings — Photon keeps it clean
     }
 
-    // ---- Moon Blue Tint ----
+    // ---- Moon (Photon-style: silver-blue, subtle) ----
     if (isSun < 0.5) {
-        // Apply cool blue-silver tint to the moon
-        vec3 moonTint = vec3(0.7, 0.8, 1.0);
+        // Cool silver-blue tint
+        vec3 moonTint = vec3(0.75, 0.82, 1.0);
         tex.rgb *= moonTint;
 
-        // Subtle glow around moon
-        float moonGlow = 1.0 / (1.0 + pow(distFromCenter * 5.0, 2.0));
-        moonGlow *= smoothstep(0.5, 0.2, distFromCenter);
-        tex.rgb += vec3(0.15, 0.2, 0.35) * moonGlow * 0.4;
-
-        // Slightly brighten the moon surface
-        float moonSurface = smoothstep(0.25, 0.0, distFromCenter);
-        tex.rgb += vec3(0.05, 0.07, 0.12) * moonSurface;
+        // Very subtle glow
+        float moonGlow = 1.0 / (1.0 + pow(distFromCenter * 6.0, 2.0));
+        moonGlow *= smoothstep(0.4, 0.15, distFromCenter);
+        tex.rgb += vec3(0.10, 0.13, 0.25) * moonGlow * 0.3;
     }
 
     // ---- Horizon fade ----

@@ -10,7 +10,7 @@
 // Feature toggles
 // ---------------------------------------------------------------------------
 #define BLOOM
-#define BLOOM_AMOUNT 0.25      // [0.1 0.15 0.2 0.25 0.3 0.4 0.5]
+#define BLOOM_AMOUNT 0.10      // [0.05 0.08 0.1 0.15 0.2 0.25 0.3]
 #define NIGHT_EYE
 
 // ---------------------------------------------------------------------------
@@ -101,14 +101,14 @@ vec3 applyNightEye(vec3 color) {
 
     if (nightStrength < 0.001) return color;
 
-    // Desaturate and shift toward blue
+    // Photon-style: subtle desaturation and blue shift at night
     float grey = luminance(color);
-    vec3 blueShift = vec3(grey * 0.5, grey * 0.6, grey * 1.2);
+    vec3 blueShift = vec3(grey * 0.6, grey * 0.65, grey * 1.0);
 
-    // Slight brightness boost so the player can still see
-    blueShift *= 1.8;
+    // Moderate brightness boost
+    blueShift *= 1.5;
 
-    return mix(color, blueShift, nightStrength * 0.6);
+    return mix(color, blueShift, nightStrength * 0.45);
 }
 #endif
 
